@@ -35,7 +35,7 @@ type Listener = (event: ChatSessionEvent) => void;
 const welcomeMessage: TextChatMessage = {
   id: 0,
   role: 'system',
-  content: 'bubble-code · 编码智能体\n输入你的需求，按 Enter 发送。',
+  content: 'Bubble Code · 编码智能体\n输入你的需求，按 Enter 发送。',
 };
 
 export class ChatSession {
