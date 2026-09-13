@@ -1,7 +1,40 @@
 import OpenAI from 'openai';
+import {parseToolInput} from '@bubble-code/utils/tool-input.js';
 import {type Model, type StreamOptions} from './llm.js';
 import {type Response, type Message, type ToolCallRecord} from './message.js';
-import {parseToolInput} from '@bubble-code/utils/tool-input.js';
+
+// 流式工具调用的累积结果
+type ToolCallAccumulator = {
+  id: string;
+  name: string;
+  arguments: string;
+};
+
+// OpenAI 的工具调用分片只有 index 稳定，其余字段可能只在一部分分片里出现
+type ToolCallDelta = {
+  index: number;
+  id?: string;
+  function?: {name?: string; arguments?: string};
+};
+
+function mergeToolCallDelta(
+  toolCalls: Map<number, ToolCallAccumulator>,
+  delta: ToolCallDelta,
+): void {
+  const existing = toolCalls.get(delta.index);
+  if (existing === undefined) {
+    toolCalls.set(delta.index, {
+      id: delta.id ?? '',
+      name: delta.function?.name ?? '',
+      arguments: delta.function?.arguments ?? '',
+    });
+    return;
+  }
+
+  existing.id += delta.id ?? '';
+  existing.name += delta.function?.name ?? '';
+  existing.arguments += delta.function?.arguments ?? '';
+}
 
 export class OpenAiModel implements Model {
   private readonly client: OpenAI;
@@ -11,7 +44,7 @@ export class OpenAiModel implements Model {
   constructor(baseUrl: string, apiKey: string, model: string) {
     this.client = new OpenAI({
       baseURL: baseUrl,
-      apiKey: apiKey,
+      apiKey,
     });
     this.model = model;
   }
@@ -20,7 +53,7 @@ export class OpenAiModel implements Model {
     messages: Message[],
     options?: StreamOptions,
   ): AsyncGenerator<Response> {
-    // build tools
+    // Build tools
     const tools: OpenAI.ChatCompletionTool[] = (options?.tools ?? []).map(
       tool => ({
         type: 'function',
@@ -31,30 +64,37 @@ export class OpenAiModel implements Model {
         },
       }),
     );
-    // build messages
+    // Build messages
     const msgs = messages.map((message): OpenAI.ChatCompletionMessageParam => {
       switch (message.role) {
         case 'system':
         case 'user':
-        case 'assistant':
+        case 'assistant': {
           const toolCalls = buildToolCalls(message.extra?.['tool_calls']);
-          // TODO 完全看不懂这是啥意思
+          // Assistant 消息要把 tool_calls 原样写回协议，否则下一轮请求对不上
           return {
             role: message.role,
             content: message.content,
             ...(toolCalls ? {tool_calls: toolCalls} : {}),
           };
+        }
+
         case 'tool': {
           const toolCallId = message.extra?.['tool_call_id'];
           if (typeof toolCallId !== 'string') {
             // 一般不会走到这里，走到这里就是代码 BUG。
-            throw new Error('tool 消息缺少 tool_call_id');
+            throw new TypeError('tool 消息缺少 tool_call_id');
           }
+
           return {
             role: 'tool',
             content: message.content,
             tool_call_id: toolCallId,
           };
+        }
+
+        default: {
+          throw new TypeError('未知的消息角色');
         }
       }
     });
@@ -71,14 +111,7 @@ export class OpenAiModel implements Model {
       {signal: options?.signal},
     );
     // 所有的工具调用
-    const toolCalls = new Map<
-      number,
-      {
-        id: string;
-        name: string;
-        arguments: string;
-      }
-    >();
+    const toolCalls = new Map<number, ToolCallAccumulator>();
     for await (const part of stream) {
       const delta = part.choices[0]?.delta;
       // 文本
@@ -88,33 +121,16 @@ export class OpenAiModel implements Model {
           text: delta.content,
         };
       }
+
       // 工具调用
       if (delta?.tool_calls) {
         for (const toolCallDelta of delta.tool_calls) {
-          const index = toolCallDelta.index;
-          let tolCall = toolCalls.get(index);
-          if (!tolCall) {
-            tolCall = {
-              id: toolCallDelta.id ?? '',
-              name: toolCallDelta.function?.name ?? '',
-              arguments: toolCallDelta.function?.arguments ?? '',
-            };
-            toolCalls.set(index, tolCall);
-          } else {
-            if (toolCallDelta.id) {
-              tolCall.id += toolCallDelta.id;
-            }
-            if (toolCallDelta.function?.name) {
-              tolCall.name += toolCallDelta.function.name;
-            }
-            if (toolCallDelta.function?.arguments) {
-              tolCall.arguments += toolCallDelta.function.arguments;
-            }
-          }
+          mergeToolCallDelta(toolCalls, toolCallDelta);
         }
       }
     }
-    // stream 结束后统一
+
+    // Stream 结束后统一
     for (const toolCall of toolCalls.values()) {
       const input = parseToolInput(toolCall.arguments);
       if (input.ok) {
@@ -143,6 +159,7 @@ function buildToolCalls(
   if (!Array.isArray(value) || value.length === 0) {
     return undefined;
   }
+
   return value.map(item => {
     const record = item as ToolCallRecord;
     return {

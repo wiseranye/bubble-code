@@ -19,11 +19,12 @@ export function parseToolInput(input: string): ToolInputParseResult {
         raw: input,
       };
     }
+
     return {
       ok: true,
       value: value as Record<string, unknown>,
     };
-  } catch (error) {
+  } catch (error: unknown) {
     return {
       ok: false,
       error: error instanceof Error ? error : new Error(String(error)),

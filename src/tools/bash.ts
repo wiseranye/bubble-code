@@ -1,5 +1,5 @@
 import {execa} from 'execa';
-import {ToolResult, type Tool} from './tool.js';
+import {type ToolResult, type Tool} from './tool.js';
 
 // Bash 输入
 export type BashInput = {
@@ -7,7 +7,7 @@ export type BashInput = {
 };
 
 // Bash 命令执行超时时间
-const BASH_EXECUTE_TIMEOUT = 30_000;
+const bashExecuteTimeout = 30_000;
 
 export const bashTool: Tool<BashInput> = {
   name: 'bash',
@@ -26,33 +26,36 @@ export const bashTool: Tool<BashInput> = {
   async execute(input): Promise<ToolResult> {
     const result = await execa('bash', ['-lc', input.command], {
       reject: false,
-      timeout: BASH_EXECUTE_TIMEOUT,
+      timeout: bashExecuteTimeout,
     });
     const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
     if (result.timedOut) {
       return {
         success: false,
-        error: `execute timed out after ${BASH_EXECUTE_TIMEOUT} seconds`,
-        output: output,
+        error: `execute timed out after ${bashExecuteTimeout / 1000} seconds`,
+        output,
       };
     }
+
     if (result.isCanceled) {
       return {
         success: false,
         error: 'execution was canceled',
-        output: output,
+        output,
       };
     }
+
     if (result.exitCode !== 0) {
       return {
         success: false,
         error: `Exit code: ${result.exitCode ?? 'unknown'}`,
-        output: output,
+        output,
       };
     }
+
     return {
       success: true,
-      output: output,
+      output,
     };
   },
 };

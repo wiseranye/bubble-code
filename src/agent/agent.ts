@@ -5,7 +5,7 @@ import {type Message} from '@bubble-code/model/message.js';
 import {type ToolRegistry} from '@bubble-code/tools/tool.js';
 import {runAgentLoop} from './agent-loop.js';
 import {type AgentEvent} from './events.js';
-import {SYSTEM_PROMPT} from './constants.js';
+import {systemPrompt} from './constants.js';
 
 export type AgentOptions = {
   model: Model;
@@ -22,7 +22,7 @@ export class Agent {
     this.tools = tools;
     this.messages.push({
       role: 'system',
-      content: SYSTEM_PROMPT,
+      content: systemPrompt,
     });
   }
 
@@ -37,7 +37,7 @@ export class Agent {
     yield* runAgentLoop(this.messages, {
       model: this.model,
       tools: this.tools,
-      signal: signal,
+      signal,
     });
   }
 }

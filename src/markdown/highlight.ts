@@ -2,10 +2,10 @@ import type {
   HighlighterCore,
   LanguageRegistration,
   ThemedToken,
-} from 'shiki/types';
+} from 'shiki/types.mjs';
 
-// shiki 只负责「代码 → ANSI 文本」。什么时候高亮、结果怎么塞回 markdown，
-// 交给 marked-shiki（见 pipeline.ts）。
+// Shiki 只负责「代码 → ANSI 文本」。什么时候高亮、结果怎么塞回 markdown，
+// 交给 ui 层的 Markdown 主题（见 ui/theme.ts）。
 
 const themeName = 'github-dark';
 
@@ -13,39 +13,41 @@ type LanguageModule = {default: LanguageRegistration[]};
 
 // 只登记常用语言，真正用到时才动态 import 语法文件
 const languages: Record<string, () => Promise<LanguageModule>> = {
-  bash: () => import('shiki/langs/bash.mjs'),
-  c: () => import('shiki/langs/c.mjs'),
-  cpp: () => import('shiki/langs/cpp.mjs'),
-  csharp: () => import('shiki/langs/csharp.mjs'),
-  css: () => import('shiki/langs/css.mjs'),
-  diff: () => import('shiki/langs/diff.mjs'),
-  dockerfile: () => import('shiki/langs/dockerfile.mjs'),
-  go: () => import('shiki/langs/go.mjs'),
-  html: () => import('shiki/langs/html.mjs'),
-  java: () => import('shiki/langs/java.mjs'),
-  javascript: () => import('shiki/langs/javascript.mjs'),
-  json: () => import('shiki/langs/json.mjs'),
-  jsx: () => import('shiki/langs/jsx.mjs'),
-  kotlin: () => import('shiki/langs/kotlin.mjs'),
-  lua: () => import('shiki/langs/lua.mjs'),
-  markdown: () => import('shiki/langs/markdown.mjs'),
-  php: () => import('shiki/langs/php.mjs'),
-  powershell: () => import('shiki/langs/powershell.mjs'),
-  python: () => import('shiki/langs/python.mjs'),
-  ruby: () => import('shiki/langs/ruby.mjs'),
-  rust: () => import('shiki/langs/rust.mjs'),
-  sql: () => import('shiki/langs/sql.mjs'),
-  swift: () => import('shiki/langs/swift.mjs'),
-  toml: () => import('shiki/langs/toml.mjs'),
-  tsx: () => import('shiki/langs/tsx.mjs'),
-  typescript: () => import('shiki/langs/typescript.mjs'),
-  xml: () => import('shiki/langs/xml.mjs'),
-  yaml: () => import('shiki/langs/yaml.mjs'),
-  zig: () => import('shiki/langs/zig.mjs'),
+  bash: async () => import('shiki/langs/bash.mjs'),
+  c: async () => import('shiki/langs/c.mjs'),
+  cpp: async () => import('shiki/langs/cpp.mjs'),
+  csharp: async () => import('shiki/langs/csharp.mjs'),
+  css: async () => import('shiki/langs/css.mjs'),
+  diff: async () => import('shiki/langs/diff.mjs'),
+  dockerfile: async () => import('shiki/langs/dockerfile.mjs'),
+  go: async () => import('shiki/langs/go.mjs'),
+  html: async () => import('shiki/langs/html.mjs'),
+  java: async () => import('shiki/langs/java.mjs'),
+  javascript: async () => import('shiki/langs/javascript.mjs'),
+  json: async () => import('shiki/langs/json.mjs'),
+  jsx: async () => import('shiki/langs/jsx.mjs'),
+  kotlin: async () => import('shiki/langs/kotlin.mjs'),
+  lua: async () => import('shiki/langs/lua.mjs'),
+  markdown: async () => import('shiki/langs/markdown.mjs'),
+  php: async () => import('shiki/langs/php.mjs'),
+  powershell: async () => import('shiki/langs/powershell.mjs'),
+  python: async () => import('shiki/langs/python.mjs'),
+  ruby: async () => import('shiki/langs/ruby.mjs'),
+  rust: async () => import('shiki/langs/rust.mjs'),
+  sql: async () => import('shiki/langs/sql.mjs'),
+  swift: async () => import('shiki/langs/swift.mjs'),
+  toml: async () => import('shiki/langs/toml.mjs'),
+  tsx: async () => import('shiki/langs/tsx.mjs'),
+  typescript: async () => import('shiki/langs/typescript.mjs'),
+  xml: async () => import('shiki/langs/xml.mjs'),
+  yaml: async () => import('shiki/langs/yaml.mjs'),
+  zig: async () => import('shiki/langs/zig.mjs'),
 };
 
 const languageAliases: Record<string, string> = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- 语言别名的字面量
   'c#': 'csharp',
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- 语言别名的字面量
   'c++': 'cpp',
   cs: 'csharp',
   docker: 'dockerfile',
@@ -82,6 +84,24 @@ function canonicalLang(lang: string | undefined): string | undefined {
 const cache = new Map<string, string[]>();
 const maxCacheEntries = 256;
 
+function cacheKey(name: string, code: string): string {
+  return `${name}\u0000${code}`;
+}
+
+// 同步查缓存。Markdown 组件的 highlightCode 钩子是同步接口，
+// 未命中时先返回纯文本，等异步高亮算完再 invalidate 重绘。
+export function peekHighlighted(
+  code: string,
+  lang: string | undefined,
+): string[] | undefined {
+  const name = canonicalLang(lang);
+  if (name === undefined) {
+    return plainLines(code);
+  }
+
+  return cache.get(cacheKey(name, code));
+}
+
 export async function highlightCode(
   code: string,
   lang: string | undefined,
@@ -91,7 +111,7 @@ export async function highlightCode(
     return plainLines(code);
   }
 
-  const key = `${name}\u0000${code}`;
+  const key = cacheKey(name, code);
   const cached = cache.get(key);
   if (cached !== undefined) {
     return cached;
@@ -165,7 +185,7 @@ async function highlight(code: string, lang: string): Promise<string[]> {
     return [''];
   }
 
-  return tokens.map(line => line.map(tokenToAnsi).join(''));
+  return tokens.map(line => line.map(token => tokenToAnsi(token)).join(''));
 }
 
 async function ensureLanguage(
@@ -216,6 +236,7 @@ function tokenToAnsi(token: ThemedToken): string {
   }
 
   const fontStyle = token.fontStyle ?? 0;
+  /* eslint-disable no-bitwise -- FontStyle 是 vscode-textmate 的位标志 */
   if ((fontStyle & bold) !== 0) {
     codes.push('1');
   }
@@ -231,6 +252,8 @@ function tokenToAnsi(token: ThemedToken): string {
   if ((fontStyle & strikethrough) !== 0) {
     codes.push('9');
   }
+
+  /* eslint-enable no-bitwise */
 
   if (codes.length === 0) {
     return token.content;

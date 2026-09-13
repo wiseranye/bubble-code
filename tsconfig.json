@@ -1,14 +1,13 @@
 {
-	"extends": "@sindresorhus/tsconfig",
-	"compilerOptions": {
-		"outDir": "dist",
-		"paths": {
-			"src/*": ["./src/*"],
-			"@bubble-code/model/*": ["./src/model/*"],
-			"@bubble-code/tools/*": ["./src/tools/*"],
-			"@bubble-code/components/*": ["./src/components/*"],
-			"@bubble-code/utils/*": ["./src/utils/*"]
-		}
-	},
-	"include": ["src"]
+  "extends": "@sindresorhus/tsconfig",
+  "compilerOptions": {
+    "outDir": "dist",
+    "paths": {
+      "src/*": ["./src/*"],
+      "@bubble-code/model/*": ["./src/model/*"],
+      "@bubble-code/tools/*": ["./src/tools/*"],
+      "@bubble-code/utils/*": ["./src/utils/*"]
+    }
+  },
+  "include": ["src"]
 }

@@ -7,4 +7,4 @@ export function newToolRegistry(): ToolRegistry {
   return registry;
 }
 
-export {Tool, ToolRegistry} from './tool.js';
+export {type Tool, ToolRegistry} from './tool.js';

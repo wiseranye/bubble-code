@@ -1,9 +1,9 @@
 // 工具定义
-export type Tool<TInput = Record<string, unknown>> = {
+export type Tool<ToolInput = Record<string, unknown>> = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  execute(input: TInput): Promise<ToolResult>;
+  execute(input: ToolInput): Promise<ToolResult>;
 };
 
 // 工具调用
@@ -30,6 +30,7 @@ export class ToolRegistry {
     if (this.tools.has(tool.name)) {
       throw new Error(`Tool already defined: ${tool.name}`);
     }
+
     this.tools.set(tool.name, tool);
   }
 
@@ -42,6 +43,7 @@ export class ToolRegistry {
     if (!tool) {
       throw new Error(`unknown tool: ${name}`);
     }
+
     return tool;
   }
 }

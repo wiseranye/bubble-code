@@ -1,67 +1,49 @@
 {
-	"name": "bubble-code",
-	"version": "0.1.0",
-	"license": "MIT",
-	"bin": "dist/cli.js",
-	"type": "module",
-	"engines": {
-		"node": ">=18.19"
-	},
-	"scripts": {
-		"build": "tsc && tsc-alias",
-		"dev": "tsc --watch",
-		"test": "prettier --check . && xo && npm run build && ava"
-	},
-	"files": [
-		"dist"
-	],
-	"dependencies": {
-		"cli-truncate": "^6.1.1",
-		"execa": "^10.0.1",
-		"ink": "^4.1.0",
-		"jsonc-parser": "^3.3.1",
-		"marked": "^18.0.12",
-		"marked-shiki": "^1.2.1",
-		"meow": "^11.0.0",
-		"openai": "^7.15.0",
-		"react": "^18.2.0",
-		"shiki": "^4.4.3",
-		"wrap-ansi": "^10.0.1"
-	},
-	"devDependencies": {
-		"@ava/typescript": "^6.0.0",
-		"@sindresorhus/tsconfig": "^3.0.1",
-		"@types/react": "^18.0.32",
-		"@vdemedes/prettier-config": "^2.0.1",
-		"ava": "^6.4.1",
-		"chalk": "^5.2.0",
-		"eslint-config-xo-react": "^0.27.0",
-		"eslint-plugin-react": "^7.32.2",
-		"eslint-plugin-react-hooks": "^4.6.0",
-		"ink-testing-library": "^4.0.0",
-		"prettier": "^2.8.7",
-		"tsc-alias": "^1.9.5",
-		"typescript": "^5.9.0",
-		"xo": "^0.53.1"
-	},
-	"ava": {
-		"typescript": {
-			"extensions": [
-				"ts",
-				"tsx"
-			],
-			"rewritePaths": {
-				"src/": "dist/"
-			},
-			"compile": false
-		}
-	},
-	"xo": {
-		"extends": "xo-react",
-		"prettier": true,
-		"rules": {
-			"react/prop-types": "off",
-			"unicorn/expiring-todo-comments": "off"
-		}
-	}
+  "name": "bubble-code",
+  "version": "0.1.0",
+  "license": "MIT",
+  "bin": "dist/cli.js",
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "build": "npm run clean && tsc && tsc-alias",
+    "dev": "tsc --watch",
+    "test": "prettier --check . && xo && npm run build && ava"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@earendil-works/pi-tui": "^0.85.1",
+    "chalk": "^5.2.0",
+    "execa": "^10.0.1",
+    "jsonc-parser": "^3.3.1",
+    "meow": "^11.0.0",
+    "openai": "^7.15.0",
+    "shiki": "^4.4.3"
+  },
+  "devDependencies": {
+    "@ava/typescript": "^6.0.0",
+    "@sindresorhus/tsconfig": "^3.0.1",
+    "@vdemedes/prettier-config": "^2.0.1",
+    "ava": "^6.4.1",
+    "prettier": "^2.8.7",
+    "tsc-alias": "^1.9.5",
+    "typescript": "^5.9.0",
+    "xo": "^0.53.1"
+  },
+  "ava": {
+    "typescript": {
+      "extensions": [
+        "ts"
+      ],
+      "rewritePaths": {
+        "src/": "dist/"
+      },
+      "compile": false
+    }
+  }
 }

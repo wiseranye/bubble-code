@@ -1,6 +1,6 @@
 import {setTimeout as sleep} from 'node:timers/promises';
-import {type Message, type Response} from './message.js';
 import {type Tool} from '@bubble-code/tools/tool.js';
+import {type Message, type Response} from './message.js';
 
 // 调用模型时要声明的工具（模型只需要 schema，不需要 execute）
 export type StreamOptions = {

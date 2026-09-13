@@ -1,6 +1,6 @@
 import {type Model} from '@bubble-code/model/llm.js';
 import {type ToolRegistry} from '@bubble-code/tools/tool.js';
-import {type Message, ToolCallRecord} from '@bubble-code/model/message.js';
+import {type Message, type ToolCallRecord} from '@bubble-code/model/message.js';
 import {type AgentEvent} from './events.js';
 
 export type LoopOptions = {
@@ -10,16 +10,16 @@ export type LoopOptions = {
   signal?: AbortSignal;
 };
 
-const DEFAULT_MAX_STEPS = 30;
+const defaultMaxSteps = 30;
 
 export async function* runAgentLoop(
   messages: Message[],
-  {model, tools, maxSteps = DEFAULT_MAX_STEPS, signal}: LoopOptions,
+  {model, tools, maxSteps = defaultMaxSteps, signal}: LoopOptions,
 ): AsyncGenerator<AgentEvent> {
   // 额外参数
   const streamOptions = {
     tools: tools.list(),
-    signal: signal,
+    signal,
   };
   let step = 0;
   while (step < maxSteps) {
@@ -27,6 +27,7 @@ export async function* runAgentLoop(
     if (signal?.aborted) {
       break;
     }
+
     let assistant = '';
     // 本轮的工具调用：input 用来执行，record 原样写回历史
     const pending: Array<{
@@ -45,8 +46,9 @@ export async function* runAgentLoop(
           } satisfies AgentEvent;
           break;
         }
+
         case 'tool_call': {
-          const toolCall = response.toolCall;
+          const {toolCall} = response;
           // 先只登记，等本轮结束后再执行
           pending.push({
             record: {
@@ -65,15 +67,18 @@ export async function* runAgentLoop(
           };
           break;
         }
+
         case 'error': {
           yield {type: 'error', error: response.error};
           break;
         }
+
         default: {
           break;
         }
       }
     }
+
     // 没有工具调用 = 模型给出最终回答，循环结束
     if (pending.length === 0) {
       if (assistant !== '') {
@@ -82,10 +87,12 @@ export async function* runAgentLoop(
           content: assistant,
         });
       }
+
       yield {type: 'complete', output: assistant};
       return;
     }
-    // assistant 的 tool_calls 必须先于 tool 结果进历史，
+
+    // Assistant 的 tool_calls 必须先于 tool 结果进历史，
     // 否则下一轮请求会因为 tool 消息找不到对应的 tool_calls 被 API 拒绝
     messages.push({
       role: 'assistant',
@@ -95,22 +102,24 @@ export async function* runAgentLoop(
       },
     });
     // 循环工具调用
-    for (const { record, input } of pending) {
+    for (const {record, input} of pending) {
       let output: string;
       let success = false;
       try {
+        // eslint-disable-next-line no-await-in-loop, unicorn/no-array-callback-reference -- 工具按顺序执行；ToolRegistry.find 不是 Array.find
         const result = await tools.find(record.name).execute(input);
         success = result.success;
         // 失败信息也要给模型看到，否则它不知道命令挂了
         output = result.success
           ? result.output
           : [result.error, result.output].filter(Boolean).join('\n');
-      } catch (error) {
+      } catch (error: unknown) {
         // 工具不存在、或工具自己抛了，也要作为结果喂回去，模型才有机会纠正；
         output = `工具执行失败：${
           error instanceof Error ? error.message : String(error)
         }`;
       }
+
       // 工具调用结果
       yield {
         type: 'tool_result',

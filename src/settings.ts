@@ -1,8 +1,8 @@
 import {readFile} from 'node:fs/promises';
-import {parse, printParseErrorCode, type ParseError} from 'jsonc-parser';
 import {homedir} from 'node:os';
 import {isAbsolute, join} from 'node:path';
 import process from 'node:process';
+import {parse, printParseErrorCode, type ParseError} from 'jsonc-parser';
 
 // 模型定义
 export type ModelDef = {
@@ -40,18 +40,20 @@ export async function loadSettings(): Promise<Settings> {
   let text: string;
   try {
     text = await readFile(path, 'utf8');
-  } catch (error) {
+  } catch (error: unknown) {
     // 没有配置文件是正常情况，用默认值
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
       return defaults;
     }
+
     throw error;
   }
+
   const errors: ParseError[] = [];
   const data = parse(text, errors, {
     allowEmptyContent: true, // 允许尾随逗号
     allowTrailingComma: true, // 空文件视为“没有配置”，而不是报错
-  }) as unknown; // parse 返回 any，立刻收敛成 unknown，不然 any 会一路漏下去
+  }) as unknown; // Parse 返回 any，立刻收敛成 unknown，不然 any 会一路漏下去
 
   const [firstError] = errors;
   if (firstError) {
@@ -62,6 +64,7 @@ export async function loadSettings(): Promise<Settings> {
       )}`,
     );
   }
+
   return validateSettings(data, path);
 }
 
@@ -110,17 +113,22 @@ function isSettings(value: unknown): value is Settings {
   }
 
   const {providers} = value;
-  return Array.isArray(providers) && providers.every(isProvider);
+  return (
+    Array.isArray(providers) && providers.every(value => isProvider(value))
+  );
 }
 
 // --------------- 路径解析 --------------- //
 
 // 各平台统一：XDG_CONFIG_HOME（绝对路径时优先）→ ~/.config
 function configDirectory(): string {
+  // TSConfig 的 noPropertyAccessFromIndexSignature 要求索引签名用方括号
+  // eslint-disable-next-line @typescript-eslint/dot-notation
   const xdg = process.env['XDG_CONFIG_HOME'];
   if (xdg && isAbsolute(xdg)) {
     return xdg;
   }
+
   return join(homedir(), '.config');
 }
 
