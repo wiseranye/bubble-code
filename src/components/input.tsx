@@ -1,5 +1,6 @@
 import React, {useCallback, useRef, useState} from 'react';
-import {Box, Text, useInput, type Key} from 'ink';
+import {Box, Text, useInput, useStdout, type Key} from 'ink';
+import {stringWidth} from '../utils/width.js';
 
 type Props = {
   readonly onSubmit: (value: string) => void;
@@ -220,19 +221,71 @@ export default function Input({onSubmit, onCancel, isDisabled}: Props) {
 
   useInput(handleInput);
 
-  const cursorCharacter = value[cursor] ?? ' ';
-  const beforeCursor = value.slice(0, cursor);
-  const afterCursor = value.slice(cursor + 1);
+  const {stdout} = useStdout();
+  // "❯ " 占 2 列，左侧省略号占 1 列；输入框固定一行，
+  // 一旦它把实时区域撑得比屏幕还高，Ink 就会清屏重写（画面重复）
+  const width = Math.max(4, (stdout.columns ?? 80) - 3);
+  const window = inputWindow(value.replace(/\n/g, newlineMark), cursor, width);
+
+  const beforeCursor = window.text.slice(0, window.cursor);
+  const afterCursor = window.text.slice(window.cursor);
+  const cursorCharacter =
+    afterCursor.slice(0, 1) === '' ? ' ' : afterCursor[0]!;
 
   return (
     <Box>
-      <Text bold color="cyan">
-        ❯
+      <Box flexShrink={0}>
+        <Text bold color="cyan">
+          ❯
+        </Text>
+        <Text> </Text>
+      </Box>
+      <Text wrap="truncate">
+        {window.hiddenHead ? <Text dimColor>…</Text> : null}
+        <Text>{beforeCursor}</Text>
+        <Text inverse>{cursorCharacter}</Text>
+        <Text>{afterCursor.slice(cursorCharacter.length)}</Text>
       </Text>
-      <Text> </Text>
-      <Text>{beforeCursor}</Text>
-      <Text inverse>{cursorCharacter}</Text>
-      <Text>{afterCursor}</Text>
     </Box>
   );
+}
+
+// 换行在输入框里显示成 ↵（固定一行显示，换行由标记表示）
+const newlineMark = '↵';
+
+type InputWindow = {
+  text: string;
+  // 光标在 text 里的下标
+  cursor: number;
+  hiddenHead: boolean;
+};
+
+// 横向开窗：保证光标可见（和 shell 一样），并自己按列截断。
+// 不能只靠 Ink 的 wrap="truncate"：容器分配宽度不精确时它不会截
+function inputWindow(text: string, cursor: number, width: number): InputWindow {
+  const headWidth = stringWidth(text.slice(0, cursor));
+  // 左右各留一列给省略号
+  const hiddenHead = headWidth >= width - 1;
+  const body = Math.max(1, width - (hiddenHead ? 1 : 0) - 1);
+
+  let start = 0;
+  let columns = headWidth;
+  while (start < cursor && columns > body - 1) {
+    columns -= stringWidth(text[start] ?? '');
+    start += 1;
+  }
+
+  // columns 是从 start 累加到光标的宽度，接着从光标往后再补
+  let end = cursor;
+  while (end < text.length && columns + stringWidth(text[end] ?? '') <= body) {
+    columns += stringWidth(text[end] ?? '');
+    end += 1;
+  }
+
+  const hiddenTail = end < text.length;
+  return {
+    text: text.slice(start, end) + (hiddenTail ? '…' : ''),
+    cursor: cursor - start,
+    hiddenHead,
+  };
 }

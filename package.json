@@ -16,12 +16,17 @@
 		"dist"
 	],
 	"dependencies": {
+		"cli-truncate": "^6.1.1",
 		"execa": "^10.0.1",
 		"ink": "^4.1.0",
 		"jsonc-parser": "^3.3.1",
+		"marked": "^18.0.12",
+		"marked-shiki": "^1.2.1",
 		"meow": "^11.0.0",
 		"openai": "^7.15.0",
-		"react": "^18.2.0"
+		"react": "^18.2.0",
+		"shiki": "^4.4.3",
+		"wrap-ansi": "^10.0.1"
 	},
 	"devDependencies": {
 		"@ava/typescript": "^6.0.0",

@@ -1,5 +1,7 @@
 import {useCallback, useRef, useState} from 'react';
+import {useStdout} from 'ink';
 import {type Agent} from './agent/agent.js';
+import {settleMarkdown} from './markdown/pipeline.js';
 
 // 文本消息（system / user / assistant）
 export type TextChatMessage = {
@@ -41,6 +43,7 @@ type UseChatResult = {
 };
 
 export function useChat(agent: Agent): UseChatResult {
+  const {stdout} = useStdout();
   const [messages, setMessages] = useState<ChatMessage[]>([welcomeMessage]);
   // messages 是「已定稿前缀 + 进行中后缀」，这个数字是两者的分界
   const [finalizedCount, setFinalizedCount] = useState(1);
@@ -128,6 +131,20 @@ export function useChat(agent: Agent): UseChatResult {
         );
       };
 
+      // <Static> 写出去的内容不会再更新，所以定稿前必须把语法高亮算完
+      const settleDraft = async (id: number | undefined) => {
+        if (id === undefined) {
+          return;
+        }
+
+        const draft = messageStore.current.find(message => message.id === id);
+        if (draft === undefined || draft.role !== 'assistant') {
+          return;
+        }
+
+        await settleMarkdown([draft.content], stdout.columns ?? 80);
+      };
+
       void (async () => {
         try {
           for await (const event of agent.send(content, {
@@ -140,7 +157,9 @@ export function useChat(agent: Agent): UseChatResult {
               }
               case 'tool_start': {
                 // 工具调用开始，说明上一段文本已经写完了，可以定稿
+                const draft = assistantBlock.current;
                 assistantBlock.current = undefined;
+                await settleDraft(draft);
                 finalize(messageStore.current.length);
                 const message: ToolChatMessage = {
                   id: idCounter.current++,
@@ -196,6 +215,8 @@ export function useChat(agent: Agent): UseChatResult {
             appendAssistantText(`\n\n[生成出错] ${detail}`);
           }
         } finally {
+          const draft = assistantBlock.current;
+          assistantBlock.current = undefined;
           // 取消或异常退出时，可能还有工具块停在「执行中」
           commit(previous =>
             previous.map(message =>
@@ -204,16 +225,16 @@ export function useChat(agent: Agent): UseChatResult {
                 : message,
             ),
           );
-          // 收尾：还在进行中的消息（最后一段文本、没跑完的工具）全部定稿
-          finalize(messageStore.current.length);
-          assistantBlock.current = undefined;
           generating.current = false;
           abortController.current = undefined;
           setIsStreaming(false);
+          // 收尾：最后一段文本等语法高亮算完再定稿，没跑完的工具块一起定稿
+          await settleDraft(draft);
+          finalize(messageStore.current.length);
         }
       })();
     },
-    [agent, commit, patch],
+    [agent, commit, patch, stdout],
   );
 
   const cancel = useCallback(() => {
