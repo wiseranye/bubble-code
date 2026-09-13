@@ -1,0 +1,19 @@
+{
+	"providers": [
+		{
+			"name": "deepseek",
+			"type": "openai-compatible",
+			"baseUrl": "https://api.deepseek.com",
+			"models": [
+				{
+					"id": "deepseek-flash",
+					"name": "deepseek-flash",
+					"reasoning": false,
+					"input": ["text"],
+					"maxTokens": 128000,
+					"contextWindow": 1000000
+				}
+			]
+		}
+	]
+}
