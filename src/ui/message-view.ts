@@ -11,7 +11,7 @@ import {
   type TextChatMessage,
   type ToolChatMessage,
 } from '../chat-session.js';
-import {highlightCode} from '../markdown/highlight.js';
+import {highlightCode} from './highlight.js';
 import {createMarkdownTheme, style} from './theme.js';
 
 // 消息左侧标记列（标记 + 空格）占的列数

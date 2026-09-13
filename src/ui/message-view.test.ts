@@ -1,7 +1,7 @@
 import test from 'ava';
 import {stripTerminalSequences} from '@earendil-works/pi-tui';
 import {type ChatMessage} from '../chat-session.js';
-import {peekHighlighted} from '../markdown/highlight.js';
+import {peekHighlighted} from './highlight.js';
 import {AssistantMessageView, createMessageView} from './message-view.js';
 
 function plain(lines: string[]): string[] {

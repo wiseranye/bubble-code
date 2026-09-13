@@ -4,7 +4,7 @@ import {
   type MarkdownTheme,
   type SelectListTheme,
 } from '@earendil-works/pi-tui';
-import {highlightCode, peekHighlighted} from '../markdown/highlight.js';
+import {highlightCode, peekHighlighted} from './highlight.js';
 
 // 消息标记与文本的颜色，和旧 Ink 主题保持一致
 export const style = {
