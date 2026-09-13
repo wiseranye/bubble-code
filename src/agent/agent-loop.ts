@@ -47,7 +47,6 @@ export async function* runAgentLoop(
         }
         case 'tool_call': {
           const toolCall = response.toolCall;
-          const tool = tools.find(response.toolCall.name);
           // 先只登记，等本轮结束后再执行
           pending.push({
             record: {
@@ -60,7 +59,7 @@ export async function* runAgentLoop(
           // 工具调用开始
           yield {
             type: 'tool_start',
-            name: tool.name,
+            name: toolCall.name,
             input: response.toolCall?.inputRaw ?? '',
             tool_call_id: response.toolCall.id,
           };
@@ -82,9 +81,9 @@ export async function* runAgentLoop(
           role: 'assistant',
           content: assistant,
         });
-        yield {type: 'complete', output: assistant};
-        return;
       }
+      yield {type: 'complete', output: assistant};
+      return;
     }
     // assistant 的 tool_calls 必须先于 tool 结果进历史，
     // 否则下一轮请求会因为 tool 消息找不到对应的 tool_calls 被 API 拒绝
@@ -96,7 +95,7 @@ export async function* runAgentLoop(
       },
     });
     // 循环工具调用
-    for (const {record, input} of pending) {
+    for (const { record, input } of pending) {
       let output: string;
       let success = false;
       try {

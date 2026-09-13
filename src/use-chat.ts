@@ -84,6 +84,23 @@ export function useChat(agent: Agent): UseChatResult {
     [commit],
   );
 
+  // 只把「从头部开始、连续已终态」的消息定稿；一旦遇到还在执行中的工具
+  // （或正在流式接收的 assistant 草稿）就停下。直接按数组长度定稿会把并排
+  // 但还没跑完的工具划进 <Static>，之后它再也无法更新，永远停在「执行中」。
+  const finalizeSettled = useCallback(() => {
+    let count = 0;
+    for (const message of messageStore.current) {
+      if (message.role === 'tool' && message.status === 'running') {
+        break;
+      }
+      if (message.role === 'assistant' && message.id === assistantBlock.current) {
+        break;
+      }
+      count++;
+    }
+    finalize(count);
+  }, [finalize]);
+
   const send = useCallback(
     (text: string) => {
       const content = text.trim();
@@ -160,7 +177,7 @@ export function useChat(agent: Agent): UseChatResult {
                 const draft = assistantBlock.current;
                 assistantBlock.current = undefined;
                 await settleDraft(draft);
-                finalize(messageStore.current.length);
+                finalizeSettled();
                 const message: ToolChatMessage = {
                   id: idCounter.current++,
                   role: 'tool',
@@ -188,13 +205,8 @@ export function useChat(agent: Agent): UseChatResult {
                         }
                       : message,
                   );
-                  // 结果已到，这条工具消息定稿
-                  const index = messageStore.current.findIndex(
-                    message => message.id === id,
-                  );
-                  if (index !== -1) {
-                    finalize(index + 1);
-                  }
+                  // 结果已到，能连着定稿的就一起定稿
+                  finalizeSettled();
                 }
                 break;
               }
@@ -230,11 +242,11 @@ export function useChat(agent: Agent): UseChatResult {
           setIsStreaming(false);
           // 收尾：最后一段文本等语法高亮算完再定稿，没跑完的工具块一起定稿
           await settleDraft(draft);
-          finalize(messageStore.current.length);
+          finalizeSettled();
         }
       })();
     },
-    [agent, commit, patch, stdout],
+    [agent, commit, patch, finalizeSettled, stdout],
   );
 
   const cancel = useCallback(() => {
