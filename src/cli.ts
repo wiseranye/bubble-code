@@ -13,6 +13,7 @@ import {
 import {Agent} from './agent/agent.js';
 import {newToolRegistry} from './tools/index.js';
 import {createChatApp} from './ui/app.js';
+import {killTrackedChildren} from './utils/shell.js';
 
 meow(
   `
@@ -33,6 +34,19 @@ if (!process.stdin.isTTY) {
     'bubble-code needs an interactive terminal (TTY) to run.\n',
   );
   process.exit(1);
+}
+
+// 兜底：信号直接终止进程时不会触发 'exit' 事件，
+// 这里先同步杀掉还在执行的 bash 子进程再退出。
+// （TUI 原始模式下 Ctrl+C 走按键分支，不会到这里）
+for (const [sig, exitCode] of [
+  ['SIGINT', 130],
+  ['SIGTERM', 143],
+] as const) {
+  process.on(sig, () => {
+    killTrackedChildren();
+    process.exit(exitCode);
+  });
 }
 
 function findModel(settings: Settings): {provider: Provider; model: ModelDef} {

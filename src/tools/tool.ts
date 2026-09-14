@@ -1,9 +1,14 @@
+// 工具执行上下文（目前只有取消信号）
+export type ToolContext = {
+  signal?: AbortSignal;
+};
+
 // 工具定义
 export type Tool<ToolInput = Record<string, unknown>> = {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  execute(input: ToolInput): Promise<ToolResult>;
+  execute(input: ToolInput, context?: ToolContext): Promise<ToolResult>;
 };
 
 // 工具调用

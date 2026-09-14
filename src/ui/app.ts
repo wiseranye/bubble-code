@@ -68,6 +68,8 @@ export function createChatApp(tui: TUI, session: ChatSession): void {
 
   const handleKey = (data: string): TuiInputListenerResult => {
     if (matchesKey(data, Key.ctrl('c'))) {
+      // 先取消会话，让正在执行的工具（如 bash 命令）收到 abort 并杀掉子进程
+      session.cancel();
       tui.stop();
       // Ctrl+C 直接退出：这是前台 TUI 进程，退出就是它的职责
       // eslint-disable-next-line unicorn/no-process-exit

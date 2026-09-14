@@ -103,11 +103,16 @@ export async function* runAgentLoop(
     });
     // 循环工具调用
     for (const {record, input} of pending) {
+      // 被取消后不再执行剩余的工具
+      if (signal?.aborted) {
+        break;
+      }
+
       let output: string;
       let success = false;
       try {
         // eslint-disable-next-line no-await-in-loop, unicorn/no-array-callback-reference -- 工具按顺序执行；ToolRegistry.find 不是 Array.find
-        const result = await tools.find(record.name).execute(input);
+        const result = await tools.find(record.name).execute(input, {signal});
         success = result.success;
         // 失败信息也要给模型看到，否则它不知道命令挂了
         output = result.success
