@@ -1,8 +1,11 @@
 {
-  "name": "bubble-code",
+  "name": "@wiseranye/bubble-code",
   "version": "0.1.0",
+  "description": "Bubble Code - 一个编码智能体",
   "license": "MIT",
-  "bin": "dist/cli.js",
+  "bin": {
+    "bubble": "dist/cli.js"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.19.0"
@@ -11,11 +14,15 @@
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc && tsc-alias",
     "dev": "tsc --watch",
-    "test": "prettier --check . && xo && npm run build && ava"
+    "test": "prettier --check . && xo && npm run build && ava",
+    "prepublishOnly": "npm run build"
   },
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@earendil-works/pi-tui": "^0.85.1",
     "chalk": "^5.2.0",

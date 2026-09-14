@@ -17,7 +17,7 @@ import {createChatApp} from './ui/app.js';
 meow(
   `
 	Usage
-	  $ bubble-code
+	  $ bubble
 
 	Description
 	  A coding agent for your terminal. Start a conversation and it will help
