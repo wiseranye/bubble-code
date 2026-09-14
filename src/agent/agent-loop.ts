@@ -1,9 +1,14 @@
 import {type Model} from '@bubble-code/model/llm.js';
 import {type ToolRegistry} from '@bubble-code/tools/tool.js';
 import {type Message, type ToolCallRecord} from '@bubble-code/model/message.js';
-import {type AgentEvent} from './events.js';
+import { type AgentEvent } from './events.js';
 
-export type LoopOptions = {
+export type AgentMessage = Message
+
+// 事件发射器
+export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
+
+export type AgentLoopOptions = {
   model: Model;
   tools: ToolRegistry;
   maxSteps?: number;
@@ -12,10 +17,11 @@ export type LoopOptions = {
 
 const defaultMaxSteps = 30;
 
-export async function* runAgentLoop(
-  messages: Message[],
-  {model, tools, maxSteps = defaultMaxSteps, signal}: LoopOptions,
-): AsyncGenerator<AgentEvent> {
+export async function runAgentLoop(
+  messages: AgentMessage[],
+  emit: AgentEventSink,
+  {model, tools, maxSteps = defaultMaxSteps, signal}: AgentLoopOptions,
+): Promise<void> {
   // 额外参数
   const streamOptions = {
     tools: tools.list(),
@@ -40,13 +46,12 @@ export async function* runAgentLoop(
       switch (response.type) {
         case 'text_delta': {
           assistant += response.text;
-          yield {
+          await emit({
             type: 'assistant_delta',
             text: response.text,
-          } satisfies AgentEvent;
+          } satisfies AgentEvent);
           break;
         }
-
         case 'tool_call': {
           const {toolCall} = response;
           // 先只登记，等本轮结束后再执行
@@ -59,20 +64,18 @@ export async function* runAgentLoop(
             input: toolCall.input,
           });
           // 工具调用开始
-          yield {
+          await emit({
             type: 'tool_start',
             name: toolCall.name,
             input: response.toolCall?.inputRaw ?? '',
             tool_call_id: response.toolCall.id,
-          };
+          });
           break;
         }
-
         case 'error': {
-          yield {type: 'error', error: response.error};
+          await emit({type: 'error', error: response.error});
           break;
         }
-
         default: {
           break;
         }
@@ -87,8 +90,7 @@ export async function* runAgentLoop(
           content: assistant,
         });
       }
-
-      yield {type: 'complete', output: assistant};
+      await emit({type: 'complete', output: assistant});
       return;
     }
 
@@ -126,18 +128,18 @@ export async function* runAgentLoop(
       }
 
       // 工具调用结果
-      yield {
+      await emit({
         type: 'tool_result',
         name: record.name,
         output,
         success,
         tool_call_id: record.id,
-      };
+      });
       // 工具调用结束
-      yield {
+      await emit({
         type: 'tool_end',
         tool_call_id: record.id,
-      };
+      });
       // 往消息列表中添加消息
       messages.push({
         role: 'tool',
@@ -150,9 +152,9 @@ export async function* runAgentLoop(
   }
 
   if (!signal?.aborted) {
-    yield {
+    await emit({
       type: 'error',
       error: new Error(`达到最大步数 ${maxSteps}，循环终止`),
-    };
+    });
   }
 }

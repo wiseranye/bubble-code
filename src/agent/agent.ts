@@ -17,6 +17,9 @@ export class Agent {
   private readonly tools: ToolRegistry;
   private readonly messages: Message[] = [];
 
+  // 所有的监听器
+  private readonly listeners: Set<(event: AgentEvent, signal?: AbortSignal) => Promise<void> | void> = new Set();
+
   constructor({model, tools}: AgentOptions) {
     this.model = model;
     this.tools = tools;
@@ -26,18 +29,33 @@ export class Agent {
     });
   }
 
-  async *send(
+  /**
+   * 订阅 Agent 生命周期事件
+   */
+  subscribe(listener: (event: AgentEvent, signal?: AbortSignal) => Promise<void> | void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  async prompt(
     input: string,
     {signal}: {signal?: AbortSignal} = {},
-  ): AsyncGenerator<AgentEvent> {
+  ): Promise<void> {
     this.messages.push({
       role: 'user',
       content: input,
     });
-    yield* runAgentLoop(this.messages, {
-      model: this.model,
-      tools: this.tools,
-      signal,
-    });
+    await runAgentLoop(this.messages,
+      async (event) => {
+        for (const listener of this.listeners) {
+          await listener(event, signal);
+        }
+      },
+      {
+        model: this.model,
+        tools: this.tools,
+        signal,
+      });
   }
+
 }

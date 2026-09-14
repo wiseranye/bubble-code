@@ -1,5 +1,8 @@
-// 工具执行上下文（目前只有取消信号）
+// 工具执行上下文
 export type ToolContext = {
+  // 工作目录
+  cwd?: string;
+  // 协作式信号：有点类似Java中的interrupt机制
   signal?: AbortSignal;
 };
 

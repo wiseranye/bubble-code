@@ -1,4 +1,5 @@
-import {type Agent} from './agent/agent.js';
+import { type Agent } from './agent/agent.js';
+import { type AgentEvent } from './agent/events.js';
 
 // 文本消息（system / user / assistant）
 export type TextChatMessage = {
@@ -50,7 +51,11 @@ export class ChatSession {
   // Tool_call_id → Chat message id，用来把 tool_result 贴回对应的工具消息
   private readonly toolBlocks = new Map<string, number>();
 
-  constructor(private readonly agent: Agent) {}
+  constructor(private readonly agent: Agent) {
+    this.agent.subscribe((event, _) => {
+      this.handleAgentEvent(event)
+    });
+  }
 
   get messages(): readonly ChatMessage[] {
     return this.store;
@@ -97,72 +102,74 @@ export class ChatSession {
     this.abortController?.abort();
   }
 
+  private async handleAgentEvent(event: AgentEvent): Promise<void> {
+    switch (event.type) {
+      case 'assistant_delta': {
+        this.appendAssistantText(event.text);
+        break;
+      }
+
+      case 'tool_start': {
+        // 工具调用开始，说明上一段文本已经写完了，可以冻结
+        this.sealAssistantBlock();
+        const message: ToolChatMessage = {
+          id: this.idCounter++,
+          role: 'tool',
+          toolCallId: event.tool_call_id,
+          name: event.name,
+          input: event.input,
+          output: '',
+          status: 'running',
+          success: true,
+        };
+        this.toolBlocks.set(event.tool_call_id, message.id);
+        this.store.push(message);
+        this.emit({type: 'message_added', message});
+        break;
+      }
+
+      case 'tool_result': {
+        const id = this.toolBlocks.get(event.tool_call_id);
+        if (id === undefined) {
+          break;
+        }
+
+        const updated = this.update(id, message =>
+          message.role === 'tool'
+            ? {
+                ...message,
+                output: event.output,
+                success: event.success,
+                status: 'done',
+              }
+            : message,
+        );
+        if (updated !== undefined) {
+          this.emit({type: 'message_sealed', message: updated});
+        }
+
+        break;
+      }
+
+      case 'error': {
+        this.appendAssistantText(`\n\n[出错] ${event.error.message}`);
+        break;
+      }
+
+      default: {
+        break;
+      }
+    }
+  }
+
   private async generate(
     content: string,
     controller: AbortController,
   ): Promise<void> {
     try {
-      for await (const event of this.agent.send(content, {
+      await this.agent.prompt(content, {
         signal: controller.signal,
-      })) {
-        switch (event.type) {
-          case 'assistant_delta': {
-            this.appendAssistantText(event.text);
-            break;
-          }
-
-          case 'tool_start': {
-            // 工具调用开始，说明上一段文本已经写完了，可以冻结
-            this.sealAssistantBlock();
-            const message: ToolChatMessage = {
-              id: this.idCounter++,
-              role: 'tool',
-              toolCallId: event.tool_call_id,
-              name: event.name,
-              input: event.input,
-              output: '',
-              status: 'running',
-              success: true,
-            };
-            this.toolBlocks.set(event.tool_call_id, message.id);
-            this.store.push(message);
-            this.emit({type: 'message_added', message});
-            break;
-          }
-
-          case 'tool_result': {
-            const id = this.toolBlocks.get(event.tool_call_id);
-            if (id === undefined) {
-              break;
-            }
-
-            const updated = this.update(id, message =>
-              message.role === 'tool'
-                ? {
-                    ...message,
-                    output: event.output,
-                    success: event.success,
-                    status: 'done',
-                  }
-                : message,
-            );
-            if (updated !== undefined) {
-              this.emit({type: 'message_sealed', message: updated});
-            }
-
-            break;
-          }
-
-          case 'error': {
-            this.appendAssistantText(`\n\n[出错] ${event.error.message}`);
-            break;
-          }
-
-          default: {
-            break;
-          }
-        }
-      }
+      });
     } catch (error: unknown) {
       // 用户主动取消时抛的是 AbortError，不当成错误显示
       if (!controller.signal.aborted) {

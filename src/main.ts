@@ -78,6 +78,7 @@ async function main(): Promise<void> {
   });
   const terminal = new ProcessTerminal();
   const tui = new TuiMainScreen(terminal);
+  // 目前只是单会话
   const session = new ChatSession(agent);
   createChatApp(tui, session);
   tui.start();

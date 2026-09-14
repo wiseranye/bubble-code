@@ -4,7 +4,7 @@
   "description": "Bubble Code - 一个编码智能体",
   "license": "MIT",
   "bin": {
-    "bubble": "dist/cli.js"
+    "bubble": "dist/main.js"
   },
   "type": "module",
   "engines": {
