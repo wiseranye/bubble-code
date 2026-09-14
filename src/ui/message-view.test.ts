@@ -1,5 +1,5 @@
 import test from 'ava';
-import {stripTerminalSequences} from '@earendil-works/pi-tui';
+import {stripTerminalSequences, visibleWidth} from '@earendil-works/pi-tui';
 import {type ChatMessage} from '../chat-session.js';
 import {peekHighlighted} from './highlight.js';
 import {AssistantMessageView, createMessageView} from './message-view.js';
@@ -39,6 +39,75 @@ test('sealing pre-computes syntax highlighting for code blocks', async t => {
   // 高亮已经进缓存，下次渲染就是带颜色的版本
   t.truthy(peekHighlighted(code, 'ts'));
   t.true(plain(view.render(60)).join('\n').includes(code));
+});
+
+test('code blocks render between horizontal rules without fences', t => {
+  const view = new AssistantMessageView(
+    '说明：\n\n```ts\nconst answer = 42;\n```\n',
+    () => undefined,
+  );
+  const lines = plain(view.render(40));
+  const text = lines.join('\n');
+
+  t.false(text.includes('```'));
+  t.true(text.includes('─── ts'));
+  t.true(lines.some(line => /^ {2}─+$/u.test(line)));
+  t.true(lines.some(line => line.trimEnd().endsWith('const answer = 42;')));
+  // 代码行不带竖线/拐角，复制时不会被选进去
+  t.false(lines.some(line => line.includes('│')));
+  t.false(text.includes('┌'));
+  // 行尾没有补齐到整宽的空格
+  const codeLine = lines.find(line => line.includes('const answer = 42;'));
+  t.true(codeLine !== undefined);
+  t.false(codeLine?.endsWith(' '));
+  t.true(lines.every(line => visibleWidth(line) <= 40));
+});
+
+test('long code lines wrap between the rules', t => {
+  const long = 'x'.repeat(80);
+  const view = new AssistantMessageView(
+    `\`\`\`\n${long}\n\`\`\``,
+    () => undefined,
+  );
+  const lines = plain(view.render(30));
+  const rules = lines
+    .map((line, index) => ({line, index}))
+    .filter(({line}) => /^(?:✦ | {2})─+$/u.test(line))
+    .map(({index}) => index);
+  const top = rules[0] ?? -1;
+  const bottom = rules[1] ?? -1;
+
+  t.true(top >= 0);
+  t.true(bottom > top);
+  const content = lines.slice(top + 1, bottom);
+  t.true(content.length > 1);
+  t.true(content.every(line => /^ {2}x+$/u.test(line)));
+  t.true(lines.every(line => visibleWidth(line) <= 30));
+});
+
+test('wrapped code lines keep their indentation', async t => {
+  const long = 'a'.repeat(60);
+  const view = new AssistantMessageView(
+    `\`\`\`python\ndef f():\n    total = ${long}\n\`\`\``,
+    () => undefined,
+  );
+  await view.seal();
+
+  const lines = plain(view.render(30));
+  const top = lines.findIndex(line => line.includes('─── python'));
+  const bottom = lines.findIndex(
+    (line, index) => index > top && /^ {2}─+$/u.test(line),
+  );
+  const content = lines.slice(top + 1, bottom);
+  const wrapped = content.filter(line =>
+    /^(?:total|a+)/u.test(line.trimStart()),
+  );
+
+  t.true(wrapped.length > 1);
+  // 标记缩进 2 + 代码缩进 4：折出来的每一行都要保留
+  t.true(wrapped.every(line => line.startsWith('      ')));
+  // 切正文不能把语法高亮的颜色弄丢
+  t.true(view.render(30).some(line => line.includes('\u001B[')));
 });
 
 test('async highlighting notifies the view to repaint', async t => {

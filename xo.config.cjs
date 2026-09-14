@@ -11,13 +11,14 @@ module.exports = {
     '@typescript-eslint/no-unsafe-member-access': 'off',
     '@typescript-eslint/no-unsafe-return': 'off',
     '@typescript-eslint/no-redundant-type-constituents': 'off',
+    '@typescript-eslint/restrict-plus-operands': 'off',
     '@typescript-eslint/restrict-template-expressions': 'off',
   },
   overrides: [
     {
       // Shiki 的 exports 映射要求用不带后缀的子路径（shiki/core），
       // 补上 .mjs 反而会丢掉类型声明
-      files: ['src/markdown/highlight.ts'],
+      files: ['src/ui/highlight.ts'],
       rules: {
         'n/file-extension-in-import': 'off',
       },

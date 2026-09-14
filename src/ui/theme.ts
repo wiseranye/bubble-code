@@ -4,7 +4,6 @@ import {
   type MarkdownTheme,
   type SelectListTheme,
 } from '@earendil-works/pi-tui';
-import {highlightCode, peekHighlighted} from './highlight.js';
 
 // 消息标记与文本的颜色，和旧 Ink 主题保持一致
 export const style = {
@@ -32,11 +31,9 @@ export const editorTheme: EditorTheme = {
   selectList: selectListTheme,
 };
 
-// Markdown 主题。highlightCode 是同步接口：命中缓存直接返回 shiki 结果，
-// 未命中先给纯文本，等异步算完再 invalidate 重绘（见 AssistantMessageView）
-export function createMarkdownTheme(
-  onHighlightReady?: () => void,
-): MarkdownTheme {
+// Markdown 主题。代码块由 code-block.ts 自己渲染（上下横线分隔），
+// 这里的 codeBlock / codeBlockBorder 只是满足类型，不会走到。
+export function createMarkdownTheme(): MarkdownTheme {
   return {
     heading: text => chalk.bold.cyanBright(text),
     link: text => chalk.underline.blue(text),
@@ -52,16 +49,5 @@ export function createMarkdownTheme(
     italic: text => chalk.italic(text),
     strikethrough: text => chalk.strikethrough(text),
     underline: text => chalk.underline(text),
-    highlightCode(code, lang) {
-      const highlighted = peekHighlighted(code, lang);
-      if (highlighted !== undefined) {
-        return highlighted;
-      }
-
-      void highlightCode(code, lang).then(() => {
-        onHighlightReady?.();
-      });
-      return code.split('\n');
-    },
   };
 }

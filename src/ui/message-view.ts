@@ -12,6 +12,7 @@ import {
   type ToolChatMessage,
 } from '../chat-session.js';
 import {highlightCode} from './highlight.js';
+import {withCodeBlockStyle} from './code-block.js';
 import {createMarkdownTheme, style} from './theme.js';
 
 // 消息左侧标记列（标记 + 空格）占的列数
@@ -104,14 +105,12 @@ export class AssistantMessageView implements MessageView {
 
   constructor(content: string, private readonly onHighlightReady: () => void) {
     this.text = content;
-    this.markdown = new Markdown(
-      content,
-      0,
-      0,
-      createMarkdownTheme(() => {
+    this.markdown = withCodeBlockStyle(
+      new Markdown(content, 0, 0, createMarkdownTheme()),
+      () => {
         this.markdown.invalidate();
         this.onHighlightReady();
-      }),
+      },
     );
   }
 
@@ -147,9 +146,15 @@ export class AssistantMessageView implements MessageView {
   render(width: number): string[] {
     const inner = Math.max(1, width - markerColumns);
     const lines = this.markdown.render(inner);
-    return lines.map((line, index) =>
-      index === 0 ? `${style.assistantMark('✦')} ${line}` : `  ${line}`,
-    );
+    return lines.map((line, index) => {
+      // Markdown 会把每行补空格到整宽；去掉尾部填充，复制时干净
+      const content = line.trimEnd();
+      if (index === 0) {
+        return `${style.assistantMark('✦')} ${content}`.trimEnd();
+      }
+
+      return content === '' ? '' : `  ${content}`;
+    });
   }
 }
 

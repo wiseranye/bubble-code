@@ -42,11 +42,11 @@ src/
   ui/
     app.ts                # 组装消息区 / 输入框 / 提示行与键盘接线
     message-view.ts       # user / assistant / tool / system 消息组件
-    theme.ts              # pi-tui 编辑器与 Markdown 主题、shiki 高亮回调
+    code-block.ts         # 覆盖 pi-tui 的代码块渲染，改为上下横线分隔
+    highlight.ts          # shiki 代码高亮（同步缓存 + 异步计算）
+    theme.ts              # pi-tui 编辑器与 Markdown 主题
   agent/                  # Agent 循环（模型 + 工具）
   model/                  # LLM 协议与 OpenAI 实现
-  markdown/
-    highlight.ts          # shiki 代码高亮（同步缓存 + 异步计算）
   tools/                  # 工具注册与 bash 工具
   utils/
 ```
