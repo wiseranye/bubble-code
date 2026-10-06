@@ -4,4 +4,5 @@ module.exports = {
   ...shared,
   useTabs: false,
   tabWidth: 2,
+  bracketSpacing: true,
 };

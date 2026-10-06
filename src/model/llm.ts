@@ -1,7 +1,12 @@
-import {setTimeout as sleep} from 'node:timers/promises';
-import {type Tool} from '@bubble-code/tools/tool.js';
-import {type Message, type Response} from './message.js';
-
+import { setTimeout as sleep } from 'node:timers/promises';
+import { type Tool } from '@bubble-code/tools/tool.js';
+import type {
+  AssistantMessage,
+  Message,
+  StreamChunkEvent,
+  Text,
+} from 'src/agent/types.js';
+import { EventStream } from 'src/utils/event-stream.js';
 // 调用模型时要声明的工具（模型只需要 schema，不需要 execute）
 export type StreamOptions = {
   tools?: Tool[];
@@ -12,8 +17,28 @@ export type Model = {
   stream(
     messages: Message[],
     options?: StreamOptions,
-  ): AsyncGenerator<Response>;
+  ): AssistantMessageEventStream;
 };
+
+export class AssistantMessageEventStream extends EventStream<
+  StreamChunkEvent,
+  AssistantMessage
+> {
+  constructor() {
+    super(
+      // 什么时候流结束？
+      event => event.type === 'done' || event.type === 'error',
+      // 怎么组装最终结果
+      event => {
+        if (event.type === 'done' || event.type === 'error') {
+          return event.message;
+        }
+
+        throw new Error('Unexpected event type for final result');
+      },
+    );
+  }
+}
 
 // A mock implementation used until a real model backend is wired up. It
 // streams a canned reply token-by-token so the UI behaves like a real
@@ -21,36 +46,50 @@ export type Model = {
 export class MockModel implements Model {
   constructor(private readonly delay: number = 20) {}
 
-  async *stream(messages: Message[]): AsyncGenerator<Response> {
-    const last = messages[messages.length - 1];
-    const reply = `mock reply: ${mockReply(last?.content ?? '')}`;
+  stream(_: Message[]): AssistantMessageEventStream {
+    const stream = new AssistantMessageEventStream();
 
-    for (const token of reply.split(/(\s+)/)) {
-      if (token === '') {
-        continue;
+    (async () => {
+      const output: AssistantMessage = {
+        role: 'assistant',
+        content: [],
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      };
+
+      const reply = `mock reply: 这是虚假的回复`;
+      const block: Text = { type: 'text', text: '' };
+      output.content.push(block);
+
+      stream.push({ type: 'start', partial: output });
+      stream.push({ type: 'text_start', index: 0, partial: output });
+
+      for (const token of reply.split(/(\s+)/)) {
+        if (token === '') {
+          continue;
+        }
+
+        block.text += token;
+
+        stream.push({
+          type: 'text_delta',
+          index: 0,
+          delta: token,
+          partial: output,
+        });
+
+        if (this.delay > 0) {
+          // The per-token delay is intentional: it simulates streaming.
+          // eslint-disable-next-line no-await-in-loop
+          await sleep(this.delay);
+        }
       }
 
-      yield {type: 'text_delta', text: token};
+      stream.push({ type: 'text_end', index: 0, text: block, partial: output });
+      stream.push({ type: 'done', reason: 'stop', message: output });
+      stream.end();
+    })();
 
-      if (this.delay > 0) {
-        // The per-token delay is intentional: it simulates streaming.
-        // eslint-disable-next-line no-await-in-loop
-        await sleep(this.delay);
-      }
-    }
+    return stream;
   }
-}
-
-function mockReply(prompt: string): string {
-  const preview = prompt.length > 60 ? prompt.slice(0, 60) + '…' : prompt;
-
-  return [
-    `收到：「${preview}」`,
-    '',
-    '这是 bubble-code 的模拟回复，用于演示对话窗口。',
-    '',
-    '目前还没有接入真实的模型后端。接下来会在这里接上 LLM，',
-    '并逐步加入读取文件、执行命令、编辑代码等工具能力，',
-    '让它成为一个真正的编码智能体。',
-  ].join('\n');
 }

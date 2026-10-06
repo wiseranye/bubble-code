@@ -1,28 +1,36 @@
-import {type ToolCall} from '@bubble-code/tools/tool.js';
+import { type ToolCall } from '@bubble-code/tools/tool.js';
 
-// LLM 消息角色
-export type ChatRole = 'system' | 'user' | 'assistant' | 'tool';
+// 消息角色
+export type MessageRole = 'system' | 'user' | 'assistant' | 'tool';
 
 // 与模型交换的消息（协议格式，不含 UI 概念）
 export type Message = {
-  role: ChatRole;
+  role: MessageRole;
   content: string;
   extra?: Record<string, unknown>;
 };
 
-// LLM 响应
-export type Response =
-  | {type: 'text_delta'; text: string} // 流式增量消息
+// LLM 消息事件
+export type MessageEvent =
+  | { type: 'start' }
+  // 响应
+  | { type: 'text_start' }
+  | { type: 'text_delta'; delta: string }
+  | { type: 'text_end'; content: string }
+  // 思考
+  | { type: 'thinking_start' }
+  | { type: 'thinking_delta'; delta: string }
+  | { type: 'thinking_start'; content: string }
+  // 工具
   | {
       type: 'tool_call';
       toolCall: ToolCall;
-    } // 工具调用
-  | {type: 'usage'} // Token用量
-  | {type: 'error'; error: Error}
-  | {type: 'complete'};
+    }
+  | { type: 'done' }
+  | { type: 'error'; error: Error };
 
 // LLM 接口协议
-export type Protocol = 'openai' | 'anthropic' | 'responses';
+export type Protocol = 'anthropic' | 'openai-completion' | 'openai-responses';
 
 // 工具调用记录
 export type ToolCallRecord = {

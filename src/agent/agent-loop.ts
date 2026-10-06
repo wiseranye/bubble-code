@@ -1,78 +1,154 @@
-import {type Model} from '@bubble-code/model/llm.js';
-import {type ToolRegistry} from '@bubble-code/tools/tool.js';
-import {type Message, type ToolCallRecord} from '@bubble-code/model/message.js';
-import {type AgentEvent} from './events.js';
+import { type Model } from '@bubble-code/model/llm.js';
+import type {
+  AgentContext,
+  AgentMessage,
+  ToolCall,
+  ToolResultMessage,
+  AgentEvent,
+  AssistantMessage,
+} from './types.js';
 
-export type LoopOptions = {
-  model: Model;
-  tools: ToolRegistry;
+export type AgentLoopOptions = {
   maxSteps?: number;
-  signal?: AbortSignal;
 };
+
+// 事件发射器
+export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
 const defaultMaxSteps = 30;
 
-export async function* runAgentLoop(
-  messages: Message[],
-  {model, tools, maxSteps = defaultMaxSteps, signal}: LoopOptions,
-): AsyncGenerator<AgentEvent> {
+export async function runAgentLoop(
+  // 本次运行的增量输入，暂时只支持文本输入，后期再考虑图片/文件引用。
+  prompt: string,
+  context: AgentContext,
+  emit: AgentEventSink,
+  model: Model,
+  signal: AbortSignal | undefined,
+  options?: AgentLoopOptions,
+): Promise<AgentMessage[]> {
+  // 本次运行新增消息
+  const newMessages: AgentMessage[] = [
+    {
+      role: 'user',
+      content: prompt,
+      timestamp: Date.now(),
+    },
+  ];
+
+  // 本轮运行时上下文
+  const runContext: AgentContext = {
+    ...context,
+    // 本轮开始前的快照 + 本轮增量消息
+    messages: [...context.messages, ...newMessages],
+  };
+
+  if (!options) {
+    options = {
+      maxSteps: defaultMaxSteps,
+    };
+  } else if (!options.maxSteps) {
+    options.maxSteps = defaultMaxSteps;
+  }
+
+  await runLoop(runContext, options, emit, signal, model, newMessages);
+
+  return newMessages;
+}
+
+// 返回本次运行新增的消息
+async function runLoop(
+  context: AgentContext,
+  options: AgentLoopOptions,
+  emit: AgentEventSink,
+  signal: AbortSignal | undefined,
+  model: Model,
+  newMessages: AgentMessage[],
+): Promise<AgentMessage[]> {
   // 额外参数
   const streamOptions = {
-    tools: tools.list(),
+    tools: context.tools.list(),
     signal,
   };
+  await emit({ type: 'run_start' });
   let step = 0;
-  while (step < maxSteps) {
+  while (step < options.maxSteps!) {
     // 上一步刚被取消就别再发起请求了
     if (signal?.aborted) {
       break;
     }
 
-    let assistant = '';
-    // 本轮的工具调用：input 用来执行，record 原样写回历史
-    const pending: Array<{
-      record: ToolCallRecord;
-      input: Record<string, unknown>;
-    }> = [];
+    await emit({ type: 'turn_start' });
+
+    // 本轮最终消息
+    let message: AssistantMessage | undefined = undefined;
+    // 本轮待执行的工具调用列表
+    const waitingToolCalls: Array<ToolCall> = [];
     // 模型输出必须顺序消费，不能并发拉取。
     // eslint-disable-next-line no-await-in-loop
-    for await (const response of model.stream(messages, streamOptions)) {
-      switch (response.type) {
+    for await (const event of model.stream(context.messages, streamOptions)) {
+      switch (event.type) {
+        // 流式增量
         case 'text_delta': {
-          assistant += response.text;
-          yield {
-            type: 'assistant_delta',
-            text: response.text,
-          } satisfies AgentEvent;
-          break;
-        }
-
-        case 'tool_call': {
-          const {toolCall} = response;
-          // 先只登记，等本轮结束后再执行
-          pending.push({
-            record: {
-              id: toolCall.id,
-              name: toolCall.name,
-              arguments: toolCall.inputRaw,
-            },
-            input: toolCall.input,
+          await emit({
+            type: 'text_delta',
+            delta: event.delta,
           });
+          break;
+        }
+        case 'text_end': {
+          await emit({
+            type: 'text_end',
+            text: event.text,
+          });
+          break;
+        }
+        case 'thinking_delta': {
+          await emit({
+            type: 'thinking_delta',
+            delta: event.delta,
+          });
+          break;
+        }
+        case 'thinking_end': {
+          await emit({
+            type: 'thinking_end',
+            thinking: event.thinking,
+          });
+          break;
+        }
+        // 暂时只关心工具消息最终结果
+        case 'tool_call_end': {
+          const { toolCall } = event;
+          // 先只登记，等本轮结束后再执行
+          waitingToolCalls.push(toolCall);
           // 工具调用开始
-          yield {
+          await emit({
             type: 'tool_start',
-            name: toolCall.name,
-            input: response.toolCall?.inputRaw ?? '',
-            tool_call_id: response.toolCall.id,
-          };
+            toolCall: toolCall,
+          });
           break;
         }
-
+        case 'done': {
+          message = event.message;
+          newMessages.push(event.message);
+          context.messages.push(event.message);
+          break;
+        }
         case 'error': {
-          yield {type: 'error', error: response.error};
-          break;
+          // 本轮结束
+          await emit({
+            type: 'turn_end',
+            message: event.message,
+            toolResults: [],
+          });
+          await emit({
+            type: 'run_end',
+            reason: event.reason === 'aborted' ? 'aborted' : 'error',
+            error: event.error,
+            messages: newMessages,
+          });
+          return newMessages;
         }
-
         default: {
           break;
         }
@@ -80,34 +156,26 @@ export async function* runAgentLoop(
     }
 
     // 没有工具调用 = 模型给出最终回答，循环结束
-    if (pending.length === 0) {
-      if (assistant !== '') {
-        messages.push({
-          role: 'assistant',
-          content: assistant,
-        });
-      }
-
-      yield {type: 'complete', output: assistant};
-      return;
+    if (waitingToolCalls.length === 0) {
+      // 本轮结束
+      await emit({ type: 'turn_end', message: message, toolResults: [] });
+      await emit({
+        type: 'run_end',
+        reason: 'complete',
+        messages: newMessages,
+      });
+      return newMessages;
     }
 
-    // Assistant 的 tool_calls 必须先于 tool 结果进历史，
-    // 否则下一轮请求会因为 tool 消息找不到对应的 tool_calls 被 API 拒绝
-    messages.push({
-      role: 'assistant',
-      content: assistant,
-      extra: {
-        tool_calls: pending.map(item => item.record),
-      },
-    });
+    const toolResults: ToolResultMessage[] = [];
+
     // 循环工具调用
-    for (const {record, input} of pending) {
+    for (const { id, name, input } of waitingToolCalls) {
       let output: string;
       let success = false;
       try {
         // eslint-disable-next-line no-await-in-loop, unicorn/no-array-callback-reference -- 工具按顺序执行；ToolRegistry.find 不是 Array.find
-        const result = await tools.find(record.name).execute(input);
+        const result = await context.tools.find(name).execute(input);
         success = result.success;
         // 失败信息也要给模型看到，否则它不知道命令挂了
         output = result.success
@@ -119,35 +187,46 @@ export async function* runAgentLoop(
           error instanceof Error ? error.message : String(error)
         }`;
       }
-
-      // 工具调用结果
-      yield {
+      const toolResultMsg = {
+        role: 'tool_result',
+        toolName: name,
+        toolCallId: id,
+        output: output,
+        timestamp: Date.now(),
+      } as ToolResultMessage;
+      // 工具调用结果,暂时没有流式
+      await emit({
         type: 'tool_result',
-        name: record.name,
-        output,
-        success,
-        tool_call_id: record.id,
-      };
-      // 工具调用结束
-      yield {
-        type: 'tool_end',
-        tool_call_id: record.id,
-      };
-      // 往消息列表中添加消息
-      messages.push({
-        role: 'tool',
-        content: output,
-        extra: {tool_call_id: record.id},
+        toolCallId: id,
+        result: toolResultMsg,
+        success: success,
       });
+      toolResults.push(toolResultMsg);
+      newMessages.push(toolResultMsg);
+      // 往消息列表中添加工具调用结果消息
+      context.messages.push(toolResultMsg);
     }
+
+    // 本轮结束
+    await emit({
+      type: 'turn_end',
+      message: message,
+      toolResults: toolResults,
+    });
 
     step++;
   }
 
   if (!signal?.aborted) {
-    yield {
-      type: 'error',
-      error: new Error(`达到最大步数 ${maxSteps}，循环终止`),
-    };
+    await emit({
+      type: 'run_end',
+      reason: 'max_steps',
+      error: new Error(`达到最大步数 ${options.maxSteps}，循环终止`),
+      messages: newMessages,
+    });
+  } else {
+    await emit({ type: 'run_end', reason: 'aborted', messages: newMessages });
   }
+
+  return newMessages;
 }

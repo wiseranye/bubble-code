@@ -10,16 +10,19 @@ import {
   type ChatMessage,
   type TextChatMessage,
   type ToolChatMessage,
-} from '../chat-session.js';
-import {highlightCode} from './highlight.js';
-import {withCodeBlockStyle} from './code-block.js';
-import {createMarkdownTheme, style} from './theme.js';
+} from '../agent/agent-session.js';
+import { highlightCode } from './highlight.js';
+import { withCodeBlockStyle } from './code-block.js';
+import { createMarkdownTheme, style } from './theme.js';
 
 // 消息左侧标记列（标记 + 空格）占的列数
 const markerColumns = 2;
 
 // 工具输出超过这个行数就折叠，避免一条命令刷满整个消息区
 const maxToolOutputLines = 8;
+
+// 思考过程默认折叠到这个行数，只给读者一个梗概
+const maxThinkingLines = 3;
 
 export type MessageView = Component & {
   update(message: ChatMessage): void;
@@ -40,6 +43,10 @@ export function createMessageView(
 
     case 'assistant': {
       return new AssistantMessageView(message.content, onHighlightReady);
+    }
+
+    case 'thinking': {
+      return new ThinkingMessageView(message);
     }
 
     case 'tool': {
@@ -158,6 +165,39 @@ export class AssistantMessageView implements MessageView {
   }
 }
 
+// 思考过程：暗色渲染，默认折叠成前几行，不和正文抢注意力
+class ThinkingMessageView implements MessageView {
+  constructor(private message: TextChatMessage) {}
+
+  update(message: ChatMessage): void {
+    if (message.role === 'thinking') {
+      this.message = message;
+    }
+  }
+
+  invalidate(): void {
+    // 没有缓存，不需要清
+  }
+
+  render(width: number): string[] {
+    const inner = Math.max(1, width - markerColumns);
+    const wrapped = wrapTextWithAnsi(this.message.content, inner);
+    const shown = wrapped.slice(0, maxThinkingLines);
+    const hidden = wrapped.length - shown.length;
+
+    const lines = shown.map((line, index) =>
+      index === 0
+        ? `${style.dim('✧')} ${style.dim(line)}`.trimEnd()
+        : `  ${style.dim(line)}`.trimEnd(),
+    );
+    if (hidden > 0) {
+      lines.push(`  ${style.dim(`… 还有 ${hidden} 行思考`)}`);
+    }
+
+    return lines;
+  }
+}
+
 class ToolMessageView implements MessageView {
   constructor(private message: ToolChatMessage) {}
 
@@ -172,7 +212,7 @@ class ToolMessageView implements MessageView {
   }
 
   render(width: number): string[] {
-    const {message} = this;
+    const { message } = this;
     const running = message.status === 'running';
     const failed = !running && !message.success;
 
@@ -192,7 +232,7 @@ class ToolMessageView implements MessageView {
       }
     }
 
-    const {lines: outputLines, hidden} = toolOutputLines(
+    const { lines: outputLines, hidden } = toolOutputLines(
       message.output,
       maxToolOutputLines,
     );
@@ -219,7 +259,7 @@ function collectCodeTokens(tokens: Token[]): Tokens.Code[] {
       continue;
     }
 
-    const children = (token as {tokens?: Token[]}).tokens;
+    const children = (token as { tokens?: Token[] }).tokens;
     if (children !== undefined) {
       found.push(...collectCodeTokens(children));
     }
@@ -272,7 +312,7 @@ type OutputLines = {
 
 function toolOutputLines(output: string, limit: number): OutputLines {
   if (output === '' || limit <= 0) {
-    return {lines: [], hidden: 0};
+    return { lines: [], hidden: 0 };
   }
 
   const all = output.replace(/\n+$/, '').split('\n');

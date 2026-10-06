@@ -7,7 +7,9 @@
       "@bubble-code/model/*": ["./src/model/*"],
       "@bubble-code/tools/*": ["./src/tools/*"],
       "@bubble-code/utils/*": ["./src/utils/*"]
-    }
+    },
+    "target": "ES2022",
+    "lib": ["ES2022"]
   },
   "include": ["src"]
 }

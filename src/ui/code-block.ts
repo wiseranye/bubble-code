@@ -8,8 +8,8 @@ import {
   visibleWidth,
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
-import {highlightCode, peekHighlighted} from './highlight.js';
-import {style} from './theme.js';
+import { highlightCode, peekHighlighted } from './highlight.js';
+import { style } from './theme.js';
 
 // Markdown.renderToken 在 pi-tui 的 .d.ts 里是 private，运行时就是普通原型方法。
 // 内置代码块渲染固定输出 ``` 围栏，主题钩子去不掉；这里给实例替换渲染函数，
@@ -24,7 +24,7 @@ export function withCodeBlockStyle(
   markdown: Markdown,
   onHighlightReady: () => void,
 ): Markdown {
-  const instance = markdown as unknown as {renderToken?: RenderToken};
+  const instance = markdown as unknown as { renderToken?: RenderToken };
   const original = instance.renderToken;
   if (original === undefined) {
     // PI-tui 换了实现，这里要跟着更新；宁可炸掉也不要静默渲染回围栏

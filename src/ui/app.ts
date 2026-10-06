@@ -11,27 +11,27 @@ import {
   type TUI,
   type TuiInputListenerResult,
 } from '@earendil-works/pi-tui';
-import {type ChatMessage, type ChatSession} from '../chat-session.js';
+import { type ChatMessage, type AgentSession } from '../agent/agent-session.js';
 import {
   AssistantMessageView,
   createMessageView,
   type MessageView,
 } from './message-view.js';
-import {editorTheme, style} from './theme.js';
+import { editorTheme, style } from './theme.js';
 
 // 底部提示行
 const hintText =
   'Enter 发送 · Shift+Enter 换行 · ↑↓ 历史 · Ctrl+U 清空 · Esc 取消 · Ctrl+C 退出';
 
-export function createChatApp(tui: TUI, session: ChatSession): void {
+export function createChatApp(tui: TUI, session: AgentSession): void {
   const messageArea = new Container();
   const indicatorSlot = new Container();
   const views = new Map<number, MessageView>();
   let indicator: BubblingIndicator | undefined;
 
-  const editor = new Editor(tui, editorTheme, {paddingX: 1});
+  const editor = new Editor(tui, editorTheme, { paddingX: 1 });
   editor.onSubmit = text => {
-    session.send(text);
+    session.prompt(text);
   };
 
   editor.disableSubmit = session.isStreaming;
@@ -81,7 +81,7 @@ export function createChatApp(tui: TUI, session: ChatSession): void {
         editor.setText('');
       }
 
-      return {consume: true};
+      return { consume: true };
     }
 
     return undefined;

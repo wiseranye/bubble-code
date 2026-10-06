@@ -9,7 +9,7 @@ import type {
 
 const themeName = 'github-dark';
 
-type LanguageModule = {default: LanguageRegistration[]};
+type LanguageModule = { default: LanguageRegistration[] };
 
 // 只登记常用语言，真正用到时才动态 import 语法文件
 const languages: Record<string, () => Promise<LanguageModule>> = {
@@ -158,17 +158,20 @@ async function getHighlighter(): Promise<HighlighterCore> {
 async function createHighlighter(): Promise<HighlighterCore> {
   // 动态 import：语法高亮按需加载，不影响启动速度。
   // 用 JS 正则引擎而不是 WASM，省掉 oniguruma 的加载开销。
-  const [{createHighlighterCore}, {createJavaScriptRegexEngine}, themeModule] =
-    await Promise.all([
-      import('shiki/core'),
-      import('shiki/engine/javascript'),
-      import('shiki/themes/github-dark.mjs'),
-    ]);
+  const [
+    { createHighlighterCore },
+    { createJavaScriptRegexEngine },
+    themeModule,
+  ] = await Promise.all([
+    import('shiki/core'),
+    import('shiki/engine/javascript'),
+    import('shiki/themes/github-dark.mjs'),
+  ]);
 
   return createHighlighterCore({
     themes: [themeModule.default],
     langs: [],
-    engine: createJavaScriptRegexEngine({forgiving: true}),
+    engine: createJavaScriptRegexEngine({ forgiving: true }),
   });
 }
 

@@ -1,8 +1,8 @@
-import {readFile} from 'node:fs/promises';
-import {homedir} from 'node:os';
-import {isAbsolute, join} from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
-import {parse, printParseErrorCode, type ParseError} from 'jsonc-parser';
+import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
 
 // 模型定义
 export type ModelDef = {
@@ -32,7 +32,7 @@ export type Settings = {
   providers: Provider[];
 };
 
-const defaults: Settings = {providers: []};
+const defaults: Settings = { providers: [] };
 
 export async function loadSettings(): Promise<Settings> {
   // 解析配置文件路径
@@ -57,7 +57,7 @@ export async function loadSettings(): Promise<Settings> {
 
   const [firstError] = errors;
   if (firstError) {
-    const {line, column} = locate(text, firstError.offset);
+    const { line, column } = locate(text, firstError.offset);
     throw new Error(
       `${path}:${line}:${column} 配置解析失败：${printParseErrorCode(
         firstError.error,
@@ -68,7 +68,10 @@ export async function loadSettings(): Promise<Settings> {
   return validateSettings(data, path);
 }
 
-function locate(text: string, offset: number): {line: number; column: number} {
+function locate(
+  text: string,
+  offset: number,
+): { line: number; column: number } {
   let line = 1;
   let column = 1;
 
@@ -81,7 +84,7 @@ function locate(text: string, offset: number): {line: number; column: number} {
     }
   }
 
-  return {line, column};
+  return { line, column };
 }
 
 export function validateSettings(data: unknown, path: string): Settings {
@@ -103,7 +106,7 @@ function isProvider(value: unknown): value is Provider {
     return false;
   }
 
-  const {name} = value;
+  const { name } = value;
   return typeof name === 'string';
 }
 
@@ -112,7 +115,7 @@ function isSettings(value: unknown): value is Settings {
     return false;
   }
 
-  const {providers} = value;
+  const { providers } = value;
   return (
     Array.isArray(providers) && providers.every(value => isProvider(value))
   );

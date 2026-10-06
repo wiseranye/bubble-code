@@ -1,8 +1,8 @@
 import test from 'ava';
-import {stripTerminalSequences, visibleWidth} from '@earendil-works/pi-tui';
-import {type ChatMessage} from '../chat-session.js';
-import {peekHighlighted} from './highlight.js';
-import {AssistantMessageView, createMessageView} from './message-view.js';
+import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui';
+import { type ChatMessage } from '../agent/agent-session.js';
+import { peekHighlighted } from './highlight.js';
+import { AssistantMessageView, createMessageView } from './message-view.js';
 
 function plain(lines: string[]): string[] {
   return lines.map(line => stripTerminalSequences(line));
@@ -10,7 +10,7 @@ function plain(lines: string[]): string[] {
 
 test('user message keeps the marker column and wraps continuations', t => {
   const view = createMessageView(
-    {id: 1, role: 'user', content: '第一行\n第二行'},
+    { id: 1, role: 'user', content: '第一行\n第二行' },
     () => undefined,
   );
   const lines = plain(view.render(20));
@@ -71,9 +71,9 @@ test('long code lines wrap between the rules', t => {
   );
   const lines = plain(view.render(30));
   const rules = lines
-    .map((line, index) => ({line, index}))
-    .filter(({line}) => /^(?:✦ | {2})─+$/u.test(line))
-    .map(({index}) => index);
+    .map((line, index) => ({ line, index }))
+    .filter(({ line }) => /^(?:✦ | {2})─+$/u.test(line))
+    .map(({ index }) => index);
   const top = rules[0] ?? -1;
   const bottom = rules[1] ?? -1;
 
@@ -140,7 +140,7 @@ async function until(predicate: () => boolean): Promise<void> {
 }
 
 test('tool message summarises input and caps output lines', t => {
-  const output = Array.from({length: 10}, (_, index) => `line ${index + 1}`);
+  const output = Array.from({ length: 10 }, (_, index) => `line ${index + 1}`);
   const message: ChatMessage = {
     id: 2,
     role: 'tool',

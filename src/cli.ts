@@ -1,18 +1,18 @@
 #!/usr/bin/env node
 import process from 'node:process';
-import {ProcessTerminal, TuiMainScreen} from '@earendil-works/pi-tui';
+import { ProcessTerminal, TuiMainScreen } from '@earendil-works/pi-tui';
 import meow from 'meow';
-import {ChatSession} from './chat-session.js';
-import {OpenAiModel} from './model/openai.js';
+import { AgentSession } from './agent/agent-session.js';
+import { OpenAiModel } from './model/openai-completions.js';
 import {
   loadSettings,
   type ModelDef,
   type Provider,
   type Settings,
 } from './settings.js';
-import {Agent} from './agent/agent.js';
-import {newToolRegistry} from './tools/index.js';
-import {createChatApp} from './ui/app.js';
+import { Agent } from './agent/agent.js';
+import { newToolRegistry } from './tools/index.js';
+import { createChatApp } from './ui/app.js';
 
 meow(
   `
@@ -35,7 +35,10 @@ if (!process.stdin.isTTY) {
   process.exit(1);
 }
 
-function findModel(settings: Settings): {provider: Provider; model: ModelDef} {
+function findModel(settings: Settings): {
+  provider: Provider;
+  model: ModelDef;
+} {
   for (const provider of settings.providers) {
     if (!provider.models) {
       continue;
@@ -56,7 +59,7 @@ function findModel(settings: Settings): {provider: Provider; model: ModelDef} {
 
 async function main(): Promise<void> {
   const settings = await loadSettings();
-  const {provider, model} = findModel(settings);
+  const { provider, model } = findModel(settings);
   // Build agent
   const agent = new Agent({
     model: new OpenAiModel(provider.baseUrl, provider.apiKey, model.id),
@@ -64,7 +67,7 @@ async function main(): Promise<void> {
   });
   const terminal = new ProcessTerminal();
   const tui = new TuiMainScreen(terminal);
-  const session = new ChatSession(agent);
+  const session = new AgentSession(agent);
   createChatApp(tui, session);
   tui.start();
 }
