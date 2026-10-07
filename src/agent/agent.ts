@@ -1,7 +1,7 @@
 // 有状态门面
 
 import type { AgentMessage, Model } from '../llm/types.ts';
-import { type ToolRegistry } from '../tools/tool.ts';
+import { type ToolRegistry } from '../tools/types.ts';
 import { runAgentLoop } from './agent-loop.ts';
 import { systemPrompt } from './constants.ts';
 import type { AgentContext, AgentEvent } from './types.ts';

@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from 'node:timers/promises';
-import type { Tool } from '../tools/tool.ts';
+import type { Tool } from '../tools/types.ts';
 import { EventStream } from '../utils/event-stream.ts';
 
 // 调用模型时要声明的工具（模型只需要 schema，不需要 execute）

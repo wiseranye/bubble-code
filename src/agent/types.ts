@@ -5,7 +5,7 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from '../llm/types.ts';
-import type { ToolRegistry } from '../tools/tool.ts';
+import type { ToolRegistry } from '../tools/types.ts';
 
 // Agent 事件
 export type AgentEvent =

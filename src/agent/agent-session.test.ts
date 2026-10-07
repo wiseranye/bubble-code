@@ -10,7 +10,7 @@ import {
   type Thinking,
   type ToolCall,
 } from '../llm/types.ts';
-import { ToolRegistry } from '../tools/tool.ts';
+import { ToolRegistry } from '../tools/types.ts';
 import {
   AgentSession,
   type AgentSessionEvent,

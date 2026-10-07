@@ -1,5 +1,5 @@
 import { bashTool } from './bash.ts';
-import { ToolRegistry } from './tool.ts';
+import { ToolRegistry } from './types.ts';
 
 export function newToolRegistry(): ToolRegistry {
   const registry = new ToolRegistry();
@@ -7,4 +7,4 @@ export function newToolRegistry(): ToolRegistry {
   return registry;
 }
 
-export { type Tool, ToolRegistry } from './tool.ts';
+export { type Tool, ToolRegistry } from './types.ts';
