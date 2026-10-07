@@ -77,12 +77,13 @@ async function runLoop(
       break;
     }
 
+    // eslint-disable-next-line no-await-in-loop -- 事件必须按顺序发出
     await emit({ type: 'turn_start' });
 
     // 本轮最终消息
-    let message: AssistantMessage | undefined = undefined;
+    let message: AssistantMessage | undefined;
     // 本轮待执行的工具调用列表
-    const waitingToolCalls: Array<ToolCall> = [];
+    const waitingToolCalls: ToolCall[] = [];
     // 模型输出必须顺序消费，不能并发拉取。
     // eslint-disable-next-line no-await-in-loop
     for await (const event of model.stream(context.messages, streamOptions)) {
@@ -95,6 +96,7 @@ async function runLoop(
           });
           break;
         }
+
         case 'text_end': {
           await emit({
             type: 'text_end',
@@ -102,6 +104,7 @@ async function runLoop(
           });
           break;
         }
+
         case 'thinking_delta': {
           await emit({
             type: 'thinking_delta',
@@ -109,6 +112,7 @@ async function runLoop(
           });
           break;
         }
+
         case 'thinking_end': {
           await emit({
             type: 'thinking_end',
@@ -116,6 +120,7 @@ async function runLoop(
           });
           break;
         }
+
         // 暂时只关心工具消息最终结果
         case 'tool_call_end': {
           const { toolCall } = event;
@@ -124,16 +129,18 @@ async function runLoop(
           // 工具调用开始
           await emit({
             type: 'tool_start',
-            toolCall: toolCall,
+            toolCall,
           });
           break;
         }
+
         case 'done': {
           message = event.message;
           newMessages.push(event.message);
           context.messages.push(event.message);
           break;
         }
+
         case 'error': {
           // 本轮结束
           await emit({
@@ -149,6 +156,7 @@ async function runLoop(
           });
           return newMessages;
         }
+
         default: {
           break;
         }
@@ -158,7 +166,9 @@ async function runLoop(
     // 没有工具调用 = 模型给出最终回答，循环结束
     if (waitingToolCalls.length === 0) {
       // 本轮结束
-      await emit({ type: 'turn_end', message: message, toolResults: [] });
+      // eslint-disable-next-line no-await-in-loop -- 事件必须按顺序发出
+      await emit({ type: 'turn_end', message, toolResults: [] });
+      // eslint-disable-next-line no-await-in-loop -- 事件必须按顺序发出
       await emit({
         type: 'run_end',
         reason: 'complete',
@@ -187,45 +197,48 @@ async function runLoop(
           error instanceof Error ? error.message : String(error)
         }`;
       }
-      const toolResultMsg = {
+
+      const toolResultMessage: ToolResultMessage = {
         role: 'tool_result',
         toolName: name,
         toolCallId: id,
-        output: output,
+        output,
         timestamp: Date.now(),
-      } as ToolResultMessage;
+      };
       // 工具调用结果,暂时没有流式
+      // eslint-disable-next-line no-await-in-loop -- 事件必须按顺序发出
       await emit({
         type: 'tool_result',
         toolCallId: id,
-        result: toolResultMsg,
-        success: success,
+        result: toolResultMessage,
+        success,
       });
-      toolResults.push(toolResultMsg);
-      newMessages.push(toolResultMsg);
+      toolResults.push(toolResultMessage);
+      newMessages.push(toolResultMessage);
       // 往消息列表中添加工具调用结果消息
-      context.messages.push(toolResultMsg);
+      context.messages.push(toolResultMessage);
     }
 
     // 本轮结束
+    // eslint-disable-next-line no-await-in-loop -- 事件必须按顺序发出
     await emit({
       type: 'turn_end',
-      message: message,
-      toolResults: toolResults,
+      message,
+      toolResults,
     });
 
     step++;
   }
 
-  if (!signal?.aborted) {
+  if (signal?.aborted) {
+    await emit({ type: 'run_end', reason: 'aborted', messages: newMessages });
+  } else {
     await emit({
       type: 'run_end',
       reason: 'max_steps',
       error: new Error(`达到最大步数 ${options.maxSteps}，循环终止`),
       messages: newMessages,
     });
-  } else {
-    await emit({ type: 'run_end', reason: 'aborted', messages: newMessages });
   }
 
   return newMessages;

@@ -48,7 +48,7 @@ export class Agent {
     const newMessages = await runAgentLoop(
       input,
       context,
-      event => this.onEvent(event, signal),
+      async event => this.onEvent(event, signal),
       this.model,
       signal,
     );
@@ -61,6 +61,7 @@ export class Agent {
     signal?: AbortSignal,
   ): Promise<void> {
     for (const listener of this.listeners) {
+      // eslint-disable-next-line no-await-in-loop -- 监听器按订阅顺序逐个通知
       await listener(event, signal);
     }
   }

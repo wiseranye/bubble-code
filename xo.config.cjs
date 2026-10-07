@@ -13,6 +13,8 @@ module.exports = {
     '@typescript-eslint/no-redundant-type-constituents': 'off',
     '@typescript-eslint/restrict-plus-operands': 'off',
     '@typescript-eslint/restrict-template-expressions': 'off',
+    // AGENTS.md 要求字段显式声明并在构造函数中赋值，与参数属性简写冲突
+    '@typescript-eslint/parameter-properties': 'off',
   },
   overrides: [
     {
@@ -24,11 +26,22 @@ module.exports = {
       },
     },
     {
-      // OpenAI 协议字段（tool_calls、tool_call_id、stream_options 等）
-      // 是 wire format，必须保持 snake_case
-      files: ['src/agent/agent-loop.ts', 'src/model/openai.ts'],
+      // OpenAI 协议/SDK 字段(tool_calls、tool_call_id、baseURL、stream_options 等)
+      // 是外部命名，必须原样保持
+      files: [
+        'src/agent/agent-loop.ts',
+        'src/model/openai.ts',
+        'src/model/openai-completions.ts',
+      ],
       rules: {
         '@typescript-eslint/naming-convention': 'off',
+      },
+    },
+    {
+      // UUID v7 的字节打包本质就是位运算
+      files: ['src/utils/uuid.ts'],
+      rules: {
+        'no-bitwise': 'off',
       },
     },
   ],

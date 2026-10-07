@@ -1,59 +1,59 @@
-import { ToolRegistry } from 'src/tools/tool.js';
+import { type ToolRegistry } from 'src/tools/tool.js';
 
-export interface UserMessage {
+export type UserMessage = {
   role: 'user';
   content: string;
   timestamp: number; // Unix timestamp in milliseconds
-}
+};
 
-export interface Text {
+export type Text = {
   type: 'text';
   text: string;
-}
+};
 
-export interface Thinking {
+export type Thinking = {
   type: 'thinking';
   thinking: string;
   thinkingReplayData?: string;
-}
+};
 
-export interface ToolCall {
+export type ToolCall = {
   type: 'tool_call';
   id: string;
   name: string;
   input: Record<string, any>;
-}
+};
 
-export interface SystemPrompt {
+export type SystemPrompt = {
   role: 'system';
   content: string;
-}
+};
 
-export interface Usage {
+export type Usage = {
   input: number;
   output: number;
   cachedRead: number;
   cachedWrite: number;
   totalTokens: number;
-}
+};
 
-export interface AssistantMessage {
+export type AssistantMessage = {
   role: 'assistant';
-  content: (Text | Thinking | ToolCall)[];
+  content: Array<Text | Thinking | ToolCall>;
   usage?: Usage;
   stopReason: StopReason;
   rawStopReason?: string;
   timestamp: number; // Unix timestamp in milliseconds
   errorMessage?: string;
-}
+};
 
-export interface ToolResultMessage {
+export type ToolResultMessage = {
   role: 'tool_result';
   toolName: string;
   toolCallId: string;
   output: string;
   timestamp: number;
-}
+};
 
 export type Message =
   | UserMessage
@@ -128,7 +128,7 @@ export type StreamChunkEvent =
 
 // Agent 事件
 export type AgentEvent =
-  // run 生命周期：一次 prompt 的完整处理
+  // Run 生命周期：一次 prompt 的完整处理
   | { type: 'run_start' }
   | {
       type: 'run_end';
@@ -136,7 +136,7 @@ export type AgentEvent =
       messages: AgentMessage[];
       error?: Error;
     }
-  // turn 生命周期：一轮 model.stream + 工具执行
+  // Turn 生命周期：一轮 model.stream + 工具执行
   | { type: 'turn_start' }
   | {
       type: 'turn_end';
@@ -157,20 +157,20 @@ export type AgentEvent =
       success: boolean;
     };
 
-export interface AgentContext {
+export type AgentContext = {
   // 工具注册中心
   tools: ToolRegistry;
   // 会话中所有的消息
   messages: AgentMessage[];
-}
+};
 
 // 一轮的上下文
-export interface AgentLoopTurnContext {
+export type AgentLoopTurnContext = {
   messages: AssistantMessage;
   toolResults: ToolResultMessage[];
   context: AgentContext;
   newMessages: AgentMessage[];
-}
+};
 
 export class ModelError extends Error {
   constructor(

@@ -1,7 +1,5 @@
 import OpenAI from 'openai';
-import type { Model, StreamOptions } from './llm.js';
-import { AssistantMessageEventStream } from './llm.js';
-
+import { type ChatCompletionChunk } from 'openai/resources.js';
 import type {
   AssistantMessage,
   Message,
@@ -10,7 +8,8 @@ import type {
   Thinking,
   ToolCall,
 } from '../agent/types.js';
-import { ChatCompletionChunk } from 'openai/resources.js';
+import type { Model, StreamOptions } from './llm.js';
+import { AssistantMessageEventStream } from './llm.js';
 
 // OpenAI 的工具调用分片只有 index 稳定，其余字段可能只在一部分分片里出现
 type ToolCallDelta = {
@@ -48,17 +47,18 @@ export class OpenAiModel implements Model {
       try {
         await this.doStreaming(stream, messages, output, options);
       } catch (error: unknown) {
-        const err = error instanceof Error ? error : new Error(String(error));
+        const normalizedError =
+          error instanceof Error ? error : new Error(String(error));
         const aborted =
           options?.signal?.aborted === true ||
           error instanceof OpenAI.APIUserAbortError ||
-          err.name === 'AbortedError';
+          normalizedError.name === 'AbortedError';
         output.stopReason = aborted ? 'aborted' : 'error';
-        output.errorMessage = err.message;
+        output.errorMessage = normalizedError.message;
         stream.push({
           type: 'error',
           reason: output.stopReason,
-          error: err,
+          error: normalizedError,
           message: output,
         });
         stream.end();
@@ -88,32 +88,40 @@ export class OpenAiModel implements Model {
     // Build messages
     const msgs = input.map((message): OpenAI.ChatCompletionMessageParam => {
       switch (message.role) {
-        case 'system':
+        case 'system': {
           return {
             role: 'system',
             content: message.content,
           };
-        case 'user':
+        }
+
+        case 'user': {
           return {
             role: 'user',
             content: message.content,
           };
-        case 'assistant':
+        }
+
+        case 'assistant': {
           return this.buildAssistantMessage(message);
+        }
+
         case 'tool_result': {
-          const toolCallId = message.toolCallId;
+          const { toolCallId } = message;
           if (typeof toolCallId !== 'string') {
             // 一般不会走到这里，走到这里就是代码 BUG。
             throw new TypeError(
               'tool_result message has no valid tool_call_id',
             );
           }
+
           return {
             role: 'tool',
             content: message.output,
             tool_call_id: toolCallId,
           };
         }
+
         default: {
           throw new TypeError('未知的消息角色');
         }
@@ -133,29 +141,30 @@ export class OpenAiModel implements Model {
       { signal: options?.signal },
     );
 
-    // start
+    // 推送 start 事件
     stream.push({ type: 'start', partial: output });
 
-    interface StreamingToolCallBlock extends ToolCall {
+    type StreamingToolCallBlock = {
       streamIndex?: number;
       partialArgs?: string;
-    }
+    } & ToolCall;
 
     type StreamingBlock = Text | Thinking | StreamingToolCallBlock;
 
     const blocks = output.content as StreamingBlock[];
 
-    let textBlock: Text | null = null;
-    let thinkingBlock: Thinking | null = null;
+    let textBlock: Text | undefined;
+    let thinkingBlock: Thinking | undefined;
     const indexedToolCallBlocks = new Map<number, StreamingToolCallBlock>();
     // 处理文本消息块
     const ensureTextBlock = (): Text => {
       if (textBlock) {
         return textBlock;
       }
+
       textBlock = { type: 'text', text: '' };
       output.content.push(textBlock);
-      // event
+      // 推送 text_start 事件
       stream.push({
         type: 'text_start',
         index: output.content.indexOf(textBlock),
@@ -163,13 +172,14 @@ export class OpenAiModel implements Model {
       });
       return textBlock;
     };
+
     // 处理思考过程
     const ensureThinkingBlock = (thinkingReplayData?: string) => {
       if (!thinkingBlock) {
         thinkingBlock = {
           type: 'thinking',
           thinking: '',
-          thinkingReplayData: thinkingReplayData,
+          thinkingReplayData,
         };
         blocks.push(thinkingBlock);
         stream.push({
@@ -178,8 +188,10 @@ export class OpenAiModel implements Model {
           partial: output,
         });
       }
+
       return thinkingBlock;
     };
+
     // 处理工具调用消息块
     const ensureToolCallBlock = (
       delta: ToolCallDelta,
@@ -190,11 +202,11 @@ export class OpenAiModel implements Model {
       if (!block) {
         block = {
           type: 'tool_call',
-          id: delta.id || '',
-          name: delta.function?.name || '',
+          id: delta.id ?? '',
+          name: delta.function?.name ?? '',
           input: {},
           streamIndex: delta.index,
-          partialArgs: delta.function?.arguments || '',
+          partialArgs: delta.function?.arguments ?? '',
         };
         indexedToolCallBlocks.set(block.streamIndex!, block);
         blocks.push(block);
@@ -205,6 +217,7 @@ export class OpenAiModel implements Model {
           partial: output,
         });
       }
+
       return block;
     };
 
@@ -213,39 +226,54 @@ export class OpenAiModel implements Model {
       if (index === -1) {
         return;
       }
-      if (block.type === 'text') {
-        stream.push({
-          type: 'text_end',
-          index,
-          text: block,
-          partial: output,
-        });
-      } else if (block.type === 'thinking') {
-        stream.push({
-          type: 'thinking_end',
-          index,
-          thinking: block,
-          partial: output,
-        });
-      } else if (block.type === 'tool_call') {
-        let input: Record<string, unknown> = {};
-        if (block.partialArgs && block.partialArgs.trim().length > 0) {
-          try {
-            input = JSON.parse(block.partialArgs);
-          } catch {
-            // ignored
-          }
+
+      switch (block.type) {
+        case 'text': {
+          stream.push({
+            type: 'text_end',
+            index,
+            text: block,
+            partial: output,
+          });
+
+          break;
         }
-        block.input = input;
-        // finalize in-place
-        delete block.partialArgs;
-        delete block.streamIndex;
-        stream.push({
-          type: 'tool_call_end',
-          index: blocks.indexOf(block),
-          toolCall: block,
-          partial: output,
-        });
+
+        case 'thinking': {
+          stream.push({
+            type: 'thinking_end',
+            index,
+            thinking: block,
+            partial: output,
+          });
+
+          break;
+        }
+
+        case 'tool_call': {
+          let input: Record<string, unknown> = {};
+          if (block.partialArgs && block.partialArgs.trim().length > 0) {
+            try {
+              input = JSON.parse(block.partialArgs);
+            } catch {
+              // ignored
+            }
+          }
+
+          block.input = input;
+          // Finalize in-place
+          delete block.partialArgs;
+          delete block.streamIndex;
+          stream.push({
+            type: 'tool_call_end',
+            index: blocks.indexOf(block),
+            toolCall: block,
+            partial: output,
+          });
+
+          break;
+        }
+        // No default
       }
     };
 
@@ -275,11 +303,12 @@ export class OpenAiModel implements Model {
         if (errorMessage) {
           output.errorMessage = errorMessage;
         }
+
         output.rawStopReason = choice.finish_reason;
         hasStopReason = true;
       }
 
-      const delta = choice.delta;
+      const { delta } = choice;
       // 文本
       if (delta?.content && delta.content.length > 0) {
         const block = ensureTextBlock();
@@ -291,6 +320,7 @@ export class OpenAiModel implements Model {
           partial: output,
         });
       }
+
       // 工具调用
       if (delta?.tool_calls) {
         for (const toolCallDelta of delta.tool_calls) {
@@ -299,21 +329,25 @@ export class OpenAiModel implements Model {
           if (toolCallDelta.id) {
             block.id = toolCallDelta.id;
           }
+
           if (toolCallDelta.function?.name) {
             block.name = toolCallDelta.function.name;
           }
+
           if (toolCallDelta.function?.arguments) {
             block.partialArgs += toolCallDelta.function.arguments;
           }
+
           stream.push({
             type: 'tool_call_delta',
             index: blocks.indexOf(block),
-            delta: toolCallDelta.function?.arguments || '',
+            delta: toolCallDelta.function?.arguments ?? '',
             toolCall: block,
             partial: output,
           });
         }
       }
+
       // 提取思考内容
       const reasoningFields = [
         'reasoning',
@@ -343,6 +377,7 @@ export class OpenAiModel implements Model {
 
     if (output.stopReason === 'error') {
       throw new Error(
+        // eslint-disable-next-line @typescript-eslint/prefer-nullish-coalescing -- errorMessage 为空串时也要回退到默认信息
         output.errorMessage || 'Provider returned an error stop reason',
       );
     }
@@ -369,31 +404,45 @@ export class OpenAiModel implements Model {
     stopReason: StopReason;
     errorMessage?: string;
   } {
-    if (reason == null) {
+    if (reason === null || reason === undefined) {
       return { stopReason: 'stop' };
     }
+
     switch (reason) {
       case 'stop':
-      case 'end':
+      case 'end': {
         return { stopReason: 'stop' };
-      case 'length':
+      }
+
+      case 'length': {
         return { stopReason: 'length' };
-      case 'function_call':
+      }
+
+      case 'function_call': {
         return { stopReason: 'error' };
-      case 'tool_calls':
+      }
+
+      case 'tool_calls': {
         return { stopReason: 'tool_use' };
-      case 'content_filter':
+      }
+
+      case 'content_filter': {
         return {
           stopReason: 'error',
           errorMessage: 'Content filter triggered',
         };
-      case 'network_error':
+      }
+
+      case 'network_error': {
         return { stopReason: 'error', errorMessage: 'Network error' };
-      default:
+      }
+
+      default: {
         return {
           stopReason: 'error',
           errorMessage: `Provider finish_reason: ${reason}`,
         };
+      }
     }
   }
 
@@ -404,16 +453,20 @@ export class OpenAiModel implements Model {
     const toolCalls: OpenAI.ChatCompletionMessageToolCall[] = [];
     for (const item of message.content) {
       switch (item.type) {
-        case 'text':
+        case 'text': {
           content.push({
             type: 'text',
             text: item.text,
           });
           break;
-        case 'thinking':
+        }
+
+        case 'thinking': {
           // TODO 我不知道要不要传
           break;
-        case 'tool_call':
+        }
+
+        case 'tool_call': {
           toolCalls.push({
             type: 'function',
             id: item.id,
@@ -423,8 +476,11 @@ export class OpenAiModel implements Model {
             },
           });
           break;
+        }
+        // No default
       }
     }
+
     return {
       role: 'assistant',
       content: content.length > 0 ? content : null,

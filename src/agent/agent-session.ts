@@ -42,7 +42,7 @@ export class AgentSession {
   private abortController: AbortController | undefined;
   // 当前打开的流式文本段；角色切换、tool_start、turn_end、run_end 都会冻结它
   private openBlock: { id: number; role: TextBlockRole } | undefined;
-  // toolCallId → Chat message id，用来把 tool_result 贴回对应的工具消息
+  // 键为 toolCallId、值为 Chat message id，用来把 tool_result 贴回对应的工具消息
   private readonly toolBlocks = new Map<string, number>();
 
   constructor(private readonly agent: Agent) {
@@ -114,7 +114,7 @@ export class AgentSession {
         this.appendText('assistant', `\n\n[生成出错] ${detail}`);
       }
     } finally {
-      // run_end 没收到（比如 emit 抛错）时兜底收口，streaming 标志必须配对
+      // 收不到 run_end（比如 emit 抛错）时兜底收口，streaming 标志必须配对
       if (this.generating) {
         this.finishRun();
       }
@@ -200,7 +200,7 @@ export class AgentSession {
       }
 
       default: {
-        // run_start / turn_start：UI 目前没有对应表现
+        // 对 run_start / turn_start，UI 目前没有对应表现
         break;
       }
     }

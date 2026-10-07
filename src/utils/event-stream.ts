@@ -1,6 +1,6 @@
 class FifoQueue<T> {
-  private incoming: T[] = [];
-  private outgoing: T[] = [];
+  private readonly incoming: T[] = [];
+  private readonly outgoing: T[] = [];
 
   get length(): number {
     // 两个栈都可能有元素：dequeue 会把 incoming 倒进 outgoing，
@@ -24,24 +24,28 @@ class FifoQueue<T> {
    * dequeue -> outgoing 空 -> 转移 incoming=[4] -> outgoing=[4] -> pop() -> 4 ✔
    */
   dequeue(): T | undefined {
-    if (this.outgoing.length == 0) {
+    if (this.outgoing.length === 0) {
       while (this.incoming.length > 0) {
         this.outgoing.push(this.incoming.pop()!);
       }
     }
+
     return this.outgoing.pop();
   }
 }
 
 // Generic event stream class for async iteration
 export class EventStream<T, R = T> implements AsyncIterable<T> {
-  private queue = new FifoQueue<T>();
-  private waiting = new FifoQueue<(value: IteratorResult<T>) => void>();
+  private readonly queue = new FifoQueue<T>();
+  private readonly waiting = new FifoQueue<
+    (value: IteratorResult<T>) => void
+  >();
+
   private done = false;
-  private finalResultPromise: Promise<R>;
+  private readonly finalResultPromise: Promise<R>;
   private resolveFinalResult!: (result: R) => void;
-  private isComplete: (event: T) => boolean;
-  private extractResult: (event: T) => R;
+  private readonly isComplete: (event: T) => boolean;
+  private readonly extractResult: (event: T) => R;
 
   constructor(
     isComplete: (event: T) => boolean,
@@ -76,6 +80,7 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
     if (result !== undefined) {
       this.resolveFinalResult(result);
     }
+
     // Notify all waiting consumers that we're done
     while (this.waiting.length > 0) {
       const waiter = this.waiting.dequeue()!;
@@ -90,16 +95,17 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
       } else if (this.done) {
         return;
       } else {
-        const result = await new Promise<IteratorResult<T>>(resolve =>
-          this.waiting.enqueue(resolve),
-        );
+        // eslint-disable-next-line no-await-in-loop -- 异步迭代器只能逐个等待事件
+        const result = await new Promise<IteratorResult<T>>(resolve => {
+          this.waiting.enqueue(resolve);
+        });
         if (result.done) return;
         yield result.value;
       }
     }
   }
 
-  result(): Promise<R> {
+  async result(): Promise<R> {
     return this.finalResultPromise;
   }
 }
