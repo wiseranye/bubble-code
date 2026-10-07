@@ -8,7 +8,9 @@ import {
 // 消息标记与文本的颜色，和旧 Ink 主题保持一致
 export const style = {
   userMark: (text: string) => chalk.bold.cyan(text),
-  assistantMark: (text: string) => chalk.bold.green(text),
+  assistantMark: (text: string) => chalk.bold.blue(text),
+  bubble: (text: string) => chalk.bold.cyan(text),
+  prompt: (text: string) => chalk.bold.cyan(text),
   system: (text: string) => chalk.gray(text),
   toolMark: (text: string, failed: boolean) =>
     failed ? chalk.bold.red(text) : chalk.bold.yellow(text),

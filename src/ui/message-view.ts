@@ -97,7 +97,7 @@ class UserMessageView implements MessageView {
     const lines = wrapTextWithAnsi(this.message.content, inner);
     return lines.map((line, index) => {
       if (index === 0) {
-        return `${style.userMark('❯')} ${line}`;
+        return `${style.bubble('●')} ${line}`;
       }
 
       return line === '' ? '' : `  ${line}`;
@@ -157,7 +157,7 @@ export class AssistantMessageView implements MessageView {
       // Markdown 会把每行补空格到整宽；去掉尾部填充，复制时干净
       const content = line.trimEnd();
       if (index === 0) {
-        return `${style.assistantMark('✦')} ${content}`.trimEnd();
+        return `${style.assistantMark('◎')} ${content}`.trimEnd();
       }
 
       return content === '' ? '' : `  ${content}`;
@@ -187,7 +187,7 @@ class ThinkingMessageView implements MessageView {
 
     const lines = shown.map((line, index) =>
       index === 0
-        ? `${style.dim('✧')} ${style.dim(line)}`.trimEnd()
+        ? `${style.dim('◎')} ${style.dim(line)}`.trimEnd()
         : `  ${style.dim(line)}`.trimEnd(),
     );
     if (hidden > 0) {

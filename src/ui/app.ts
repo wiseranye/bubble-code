@@ -7,6 +7,7 @@ import {
   Key,
   matchesKey,
   Spacer,
+  stripTerminalSequences,
   Text,
   type TUI,
   type TuiInputListenerResult,
@@ -29,7 +30,7 @@ export function createChatApp(tui: TUI, session: AgentSession): void {
   const views = new Map<number, MessageView>();
   let indicator: BubblingIndicator | undefined;
 
-  const editor = new Editor(tui, editorTheme, { paddingX: 1 });
+  const editor = new PromptEditor(tui, editorTheme, { paddingX: 2 });
   editor.onSubmit = text => {
     session.prompt(text);
   };
@@ -130,6 +131,56 @@ export function createChatApp(tui: TUI, session: AgentSession): void {
 
     tui.requestRender();
   });
+}
+
+// 四边框输入框，首行内容区左侧 padding 放提示符，像 shell 的 prompt。
+// Editor 原生只画上下两条横线，左右边框和提示符都在 render 后处理；
+// 继承而不是包装，鼠标/焦点行为原样保留，handleMouse 里补偿边框占掉的偏移。
+class PromptEditor extends Editor {
+  override render(width: number): string[] {
+    const innerWidth = Math.max(3, width - 2);
+    const lines = super.render(innerWidth);
+    // 第 0 行是上边框，1..visibleLineCount 是内容行，
+    // 再往后是下边框和 autocomplete 弹层（弹层不画边框）
+    const visibleLineCount = (
+      this as unknown as { renderedVisibleLineCount: number }
+    ).renderedVisibleLineCount;
+    const bottomBorderIndex = 1 + visibleLineCount;
+
+    return lines.map((line, index) => {
+      if (index > bottomBorderIndex) {
+        return line;
+      }
+
+      const plain = stripTerminalSequences(line);
+      if (index === 0) {
+        return this.borderColor(`┌${plain}┐`);
+      }
+
+      if (index === bottomBorderIndex) {
+        return this.borderColor(`└${plain}┘`);
+      }
+
+      // 首行内容：左侧 padding 的首列换成提示符。
+      // ❯（U+276F）垂直居中，ASCII > 是基线对齐，视觉上会偏下
+      const content =
+        index === 1 && line.startsWith(' ')
+          ? style.prompt('❯') + line.slice(1)
+          : line;
+      return `${this.borderColor('│')}${content}${this.borderColor('│')}`;
+    });
+  }
+
+  override handleMouse(
+    event: Parameters<Editor['handleMouse']>[0],
+  ): ReturnType<Editor['handleMouse']> {
+    // 左右边框各占一列；Editor 内部的点击定位以内容区宽度为准，需要同步收窄
+    return super.handleMouse({
+      ...event,
+      x: event.x - 1,
+      width: Math.max(3, event.width - 2),
+    });
+  }
 }
 
 // 生成中的状态行：一个小气泡鼓起来再缩回去的动画

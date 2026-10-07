@@ -13,6 +13,7 @@ import {
 import { Agent } from './agent/agent.js';
 import { newToolRegistry } from './tools/index.js';
 import { createChatApp } from './ui/app.js';
+import { setTerminalTitle } from './utils/shell.js';
 
 meow(
   `
@@ -58,6 +59,7 @@ function findModel(settings: Settings): {
 }
 
 async function main(): Promise<void> {
+  setTerminalTitle('bubble');
   const settings = await loadSettings();
   const { provider, model } = findModel(settings);
   // Build agent

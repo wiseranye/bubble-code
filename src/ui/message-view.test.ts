@@ -15,7 +15,7 @@ test('user message keeps the marker column and wraps continuations', t => {
   );
   const lines = plain(view.render(20));
 
-  t.true(lines[0]?.startsWith('❯ 第一行'));
+  t.true(lines[0]?.startsWith('● 第一行'));
   t.is(lines[1], '  第二行');
 });
 
@@ -23,7 +23,7 @@ test('assistant message renders markdown behind the marker', t => {
   const view = new AssistantMessageView('**你好**，世界', () => undefined);
   const lines = plain(view.render(30));
 
-  t.true(lines[0]?.startsWith('✦ '));
+  t.true(lines[0]?.startsWith('◎ '));
   t.true(lines.join('\n').includes('你好，世界'));
 });
 
@@ -72,7 +72,7 @@ test('long code lines wrap between the rules', t => {
   const lines = plain(view.render(30));
   const rules = lines
     .map((line, index) => ({ line, index }))
-    .filter(({ line }) => /^(?:✦ | {2})─+$/u.test(line))
+    .filter(({ line }) => /^(?:◎ | {2})─+$/u.test(line))
     .map(({ index }) => index);
   const top = rules[0] ?? -1;
   const bottom = rules[1] ?? -1;
