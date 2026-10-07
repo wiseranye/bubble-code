@@ -188,7 +188,7 @@ test('thinking deltas accumulate into a separate dim message', async t => {
   );
 });
 
-test('cancel seals the partial assistant text without error text', async t => {
+test('cancel seals the partial assistant text and appends an interrupt notice', async t => {
   const agent = new Agent({
     model: new HangingModel(),
     tools: new ToolRegistry(),
@@ -204,15 +204,38 @@ test('cancel seals the partial assistant text without error text', async t => {
   session.cancel();
   await until(() => !session.isStreaming);
 
+  // 残缺的 assistant 文本原样封合，不掺入任何提示文字
   const assistant = assistantMessages(session)[0];
   t.is(assistant?.content, 'partial');
-  t.false((assistant?.content ?? '').includes('出错'));
   t.true(
     events.some(
       event =>
         event.type === 'message_sealed' && event.message.role === 'assistant',
     ),
   );
+
+  // 中断提示是独立的一条 system 消息，跟在残缺文本之后
+  const notice = session.messages.find(
+    (message): message is TextChatMessage =>
+      message.role === 'system' && message.content.includes('[已中断]'),
+  );
+  t.is(notice?.content, '[已中断] 用户按 ESC 取消了本次生成');
+  t.true(
+    session.messages.indexOf(notice!) > session.messages.indexOf(assistant!),
+  );
+  t.true(
+    events.some(
+      event =>
+        event.type === 'message_added' && event.message.id === notice?.id,
+    ),
+  );
+  t.true(
+    events.some(
+      event =>
+        event.type === 'message_sealed' && event.message.id === notice?.id,
+    ),
+  );
+
   t.deepEqual(streamingFlags(events), [true, false]);
 });
 

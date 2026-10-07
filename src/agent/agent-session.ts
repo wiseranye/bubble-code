@@ -190,6 +190,12 @@ export class AgentSession {
         }
 
         this.finishRun();
+
+        if (event.reason === 'aborted') {
+          // 用户主动中断不是错误：单独一条系统提示，不掺进 assistant 文本
+          this.appendSystemMessage('[已中断] 用户按 ESC 取消了本次生成');
+        }
+
         break;
       }
 
@@ -219,6 +225,18 @@ export class AgentSession {
     this.generating = false;
     this.abortController = undefined;
     this.emit({ type: 'streaming_changed', isStreaming: false });
+  }
+
+  // 系统提示一提交就是终态，和用户消息一样 added 后立刻 sealed
+  private appendSystemMessage(content: string): void {
+    const message: TextChatMessage = {
+      id: this.idCounter++,
+      role: 'system',
+      content,
+    };
+    this.store.push(message);
+    this.emit({ type: 'message_added', message });
+    this.emit({ type: 'message_sealed', message });
   }
 
   // 流式文本按段累积：第一个增量创建消息，之后的增量原地追加；
