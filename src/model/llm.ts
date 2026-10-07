@@ -20,23 +20,10 @@ export type Model = {
   ): AssistantMessageEventStream;
 };
 
-export class AssistantMessageEventStream extends EventStream<
-  StreamChunkEvent,
-  AssistantMessage
-> {
+export class AssistantMessageEventStream extends EventStream<StreamChunkEvent> {
   constructor() {
-    super(
-      // 什么时候流结束？
-      event => event.type === 'done' || event.type === 'error',
-      // 怎么组装最终结果
-      event => {
-        if (event.type === 'done' || event.type === 'error') {
-          return event.message;
-        }
-
-        throw new Error('Unexpected event type for final result');
-      },
-    );
+    // done / error 事件即流结束
+    super(event => event.type === 'done' || event.type === 'error');
   }
 }
 

@@ -18,7 +18,7 @@
 - 除非绝对必要，否则不要使用 `any`。
 - 只有一个调用点的单行辅助函数应直接内联。
 - 使用第三方 API 时检查 `node_modules` 中的类型定义，不要凭猜测使用 API。
-- **禁止使用内联 import**（`await import()`、`import("pkg").Type`、动态类型 import 等）。只允许使用顶层 import。
+- **禁止使用内联 import**（`await import()`、`import("pkg").Type`、动态类型 import 等）。只允许使用顶层 import。例外：为保住启动速度而按需加载的可选资源（如 `src/ui/highlight.ts` 的 shiki 语法文件与主题）允许动态 `import()`。
 - 不要通过删除或降级代码来解决过期依赖导致的类型错误；应该升级依赖。
 - 对于字段应使用显式声明，并在构造函数中进行赋值。
 - 删除任何看起来是有意保留的功能或代码之前，必须先询问。

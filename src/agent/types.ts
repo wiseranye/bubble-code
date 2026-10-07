@@ -163,24 +163,3 @@ export type AgentContext = {
   // 会话中所有的消息
   messages: AgentMessage[];
 };
-
-// 一轮的上下文
-export type AgentLoopTurnContext = {
-  messages: AssistantMessage;
-  toolResults: ToolResultMessage[];
-  context: AgentContext;
-  newMessages: AgentMessage[];
-};
-
-export class ModelError extends Error {
-  constructor(
-    message: string,
-    readonly retryable: boolean,
-    readonly status?: number,
-    readonly retryAfterMs?: number,
-    options?: { cause?: unknown },
-  ) {
-    super(message, options);
-    this.name = 'ModelError';
-  }
-}

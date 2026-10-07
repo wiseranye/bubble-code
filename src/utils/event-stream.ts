@@ -35,27 +35,17 @@ class FifoQueue<T> {
 }
 
 // Generic event stream class for async iteration
-export class EventStream<T, R = T> implements AsyncIterable<T> {
+export class EventStream<T> implements AsyncIterable<T> {
   private readonly queue = new FifoQueue<T>();
   private readonly waiting = new FifoQueue<
     (value: IteratorResult<T>) => void
   >();
 
   private done = false;
-  private readonly finalResultPromise: Promise<R>;
-  private resolveFinalResult!: (result: R) => void;
   private readonly isComplete: (event: T) => boolean;
-  private readonly extractResult: (event: T) => R;
 
-  constructor(
-    isComplete: (event: T) => boolean,
-    extractResult: (event: T) => R,
-  ) {
+  constructor(isComplete: (event: T) => boolean) {
     this.isComplete = isComplete;
-    this.extractResult = extractResult;
-    this.finalResultPromise = new Promise(resolve => {
-      this.resolveFinalResult = resolve;
-    });
   }
 
   push(event: T): void {
@@ -63,7 +53,6 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
 
     if (this.isComplete(event)) {
       this.done = true;
-      this.resolveFinalResult(this.extractResult(event));
     }
 
     // Deliver to waiting consumer or queue it
@@ -75,11 +64,8 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
     }
   }
 
-  end(result?: R): void {
+  end(): void {
     this.done = true;
-    if (result !== undefined) {
-      this.resolveFinalResult(result);
-    }
 
     // Notify all waiting consumers that we're done
     while (this.waiting.length > 0) {
@@ -103,9 +89,5 @@ export class EventStream<T, R = T> implements AsyncIterable<T> {
         yield result.value;
       }
     }
-  }
-
-  async result(): Promise<R> {
-    return this.finalResultPromise;
   }
 }

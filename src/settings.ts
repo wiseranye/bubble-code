@@ -35,8 +35,7 @@ export type Settings = {
 const defaults: Settings = { providers: [] };
 
 export async function loadSettings(): Promise<Settings> {
-  // 解析配置文件路径
-  const path = resolveSettingsPath();
+  const path = join(configDirectory(), 'bubble', 'settings.jsonc');
   let text: string;
   try {
     text = await readFile(path, 'utf8');
@@ -133,8 +132,4 @@ function configDirectory(): string {
   }
 
   return join(homedir(), '.config');
-}
-
-function resolveSettingsPath(): string {
-  return join(configDirectory(), 'bubble', 'settings.jsonc');
 }

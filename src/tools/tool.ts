@@ -6,14 +6,6 @@ export type Tool<ToolInput = Record<string, unknown>> = {
   execute(input: ToolInput): Promise<ToolResult>;
 };
 
-// 工具调用
-export type ToolCall = {
-  id: string;
-  name: string;
-  input: Record<string, unknown>;
-  inputRaw: string;
-};
-
 // 工具结果
 export type ToolResult = {
   success: boolean;
