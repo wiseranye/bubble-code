@@ -1,0 +1,18 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript", "unicorn", "import"],
+  "ignorePatterns": ["dist", "node_modules"],
+  "rules": {
+    // 未使用的占位参数用 _ 前缀声明，与之前 xo 的行为一致
+    "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }]
+  },
+  "overrides": [
+    {
+      // UUID v7 的字节打包本质就是位运算
+      "files": ["src/utils/uuid.ts"],
+      "rules": {
+        "no-bitwise": "off"
+      }
+    }
+  ]
+}
