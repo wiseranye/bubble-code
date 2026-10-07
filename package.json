@@ -13,6 +13,7 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc && tsc-alias",
+    "check": "prettier --check . && xo",
     "dev": "tsc --watch",
     "test": "prettier --check . && xo && npm run build && ava",
     "prepublishOnly": "npm run build"
