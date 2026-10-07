@@ -1,12 +1,11 @@
-import { type Model } from '@bubble-code/model/llm.js';
 import type {
-  AgentContext,
   AgentMessage,
+  AssistantMessage,
+  Model,
   ToolCall,
   ToolResultMessage,
-  AgentEvent,
-  AssistantMessage,
-} from './types.js';
+} from '../llm/types.ts';
+import type { AgentContext, AgentEvent } from './types.ts';
 
 export type AgentLoopOptions = {
   maxSteps?: number;

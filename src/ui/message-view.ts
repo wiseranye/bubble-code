@@ -1,19 +1,19 @@
 import {
-  type Component,
-  Marked,
   Markdown,
+  Marked,
+  wrapTextWithAnsi,
+  type Component,
   type Token,
   type Tokens,
-  wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
 import {
   type ChatMessage,
   type TextChatMessage,
   type ToolChatMessage,
-} from '../agent/agent-session.js';
-import { highlightCode } from './highlight.js';
-import { withCodeBlockStyle } from './code-block.js';
-import { createMarkdownTheme, style } from './theme.js';
+} from '../agent/agent-session.ts';
+import { withCodeBlockStyle } from './code-block.ts';
+import { highlightCode } from './highlight.ts';
+import { createMarkdownTheme, style } from './theme.ts';
 
 // 消息左侧标记列（标记 + 空格）占的列数
 const markerColumns = 2;

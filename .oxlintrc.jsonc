@@ -3,6 +3,8 @@
   "plugins": ["typescript", "unicorn", "import"],
   "ignorePatterns": ["dist", "node_modules"],
   "rules": {
+    // import 排序交给 prettier 插件（@ianvs/prettier-plugin-sort-imports）
+    // oxlint 的 sort-imports 按首个成员名排序，与插件按模块路径排序的结果冲突
     // 未使用的占位参数用 _ 前缀声明，与之前 xo 的行为一致
     "no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }]
   },

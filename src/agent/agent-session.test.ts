@@ -2,24 +2,22 @@ import test from 'ava';
 import {
   AssistantMessageEventStream,
   MockModel,
+  type AgentMessage,
+  type AssistantMessage,
   type Model,
   type StreamOptions,
-} from '@bubble-code/model/llm.js';
-import { ToolRegistry } from '@bubble-code/tools/tool.js';
-import { Agent } from './agent.js';
+  type Text,
+  type Thinking,
+  type ToolCall,
+} from '../llm/types.ts';
+import { ToolRegistry } from '../tools/tool.ts';
 import {
   AgentSession,
   type AgentSessionEvent,
   type TextChatMessage,
   type ToolChatMessage,
-} from './agent-session.js';
-import type {
-  AssistantMessage,
-  Message,
-  Text,
-  Thinking,
-  ToolCall,
-} from './types.js';
+} from './agent-session.ts';
+import { Agent } from './agent.ts';
 
 // 等条件成立，最多让出若干轮事件循环
 async function until(predicate: () => boolean): Promise<void> {
@@ -291,7 +289,7 @@ class ScriptedModel implements Model {
   constructor(private readonly script: ScriptTurn[]) {}
 
   stream(
-    _messages: Message[],
+    _messages: AgentMessage[],
     _options?: StreamOptions,
   ): AssistantMessageEventStream {
     const stream = new AssistantMessageEventStream();
@@ -394,7 +392,7 @@ class ScriptedModel implements Model {
 // 流出一小段文本后挂住，直到外部 abort 才以 error(aborted) 收尾
 class HangingModel implements Model {
   stream(
-    _messages: Message[],
+    _messages: AgentMessage[],
     options?: StreamOptions,
   ): AssistantMessageEventStream {
     const stream = new AssistantMessageEventStream();

@@ -2,18 +2,18 @@
 import process from 'node:process';
 import { ProcessTerminal, TuiMainScreen } from '@earendil-works/pi-tui';
 import meow from 'meow';
-import { AgentSession } from './agent/agent-session.js';
-import { OpenAiModel } from './model/openai-completions.js';
+import { AgentSession } from './agent/agent-session.ts';
+import { Agent } from './agent/agent.ts';
+import { OpenAiModel } from './llm/api/openai-completions.ts';
 import {
   loadSettings,
   type ModelDef,
   type Provider,
   type Settings,
-} from './settings.js';
-import { Agent } from './agent/agent.js';
-import { newToolRegistry } from './tools/index.js';
-import { createChatApp } from './ui/app.js';
-import { setTerminalTitle } from './utils/shell.js';
+} from './settings.ts';
+import { newToolRegistry } from './tools/index.ts';
+import { createChatApp } from './ui/app.ts';
+import { setTerminalTitle } from './utils/shell.ts';
 
 meow(
   `

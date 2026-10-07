@@ -1,10 +1,10 @@
 // 有状态门面
 
-import { type Model } from '@bubble-code/model/llm.js';
-import { type ToolRegistry } from '@bubble-code/tools/tool.js';
-import { runAgentLoop } from './agent-loop.js';
-import type { AgentContext, AgentMessage, AgentEvent } from './types.js';
-import { systemPrompt } from './constants.js';
+import type { AgentMessage, Model } from '../llm/types.ts';
+import { type ToolRegistry } from '../tools/tool.ts';
+import { runAgentLoop } from './agent-loop.ts';
+import { systemPrompt } from './constants.ts';
+import type { AgentContext, AgentEvent } from './types.ts';
 
 export type AgentOptions = {
   model: Model;

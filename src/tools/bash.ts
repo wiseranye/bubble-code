@@ -1,5 +1,5 @@
 import { execa } from 'execa';
-import { type ToolResult, type Tool } from './tool.js';
+import { type Tool, type ToolResult } from './tool.ts';
 
 // Bash 输入
 export type BashInput = {

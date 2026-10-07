@@ -1,15 +1,16 @@
 import OpenAI from 'openai';
 import { type ChatCompletionChunk } from 'openai/resources.js';
-import type {
-  AssistantMessage,
-  Message,
-  StopReason,
-  Text,
-  Thinking,
-  ToolCall,
-} from '../agent/types.js';
-import type { Model, StreamOptions } from './llm.js';
-import { AssistantMessageEventStream } from './llm.js';
+import {
+  AssistantMessageEventStream,
+  type AssistantMessage,
+  type Message,
+  type Model,
+  type StopReason,
+  type StreamOptions,
+  type Text,
+  type Thinking,
+  type ToolCall,
+} from '../types.ts';
 
 // OpenAI 的工具调用分片只有 index 稳定，其余字段可能只在一部分分片里出现
 type ToolCallDelta = {

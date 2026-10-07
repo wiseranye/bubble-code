@@ -1,15 +1,15 @@
 import {
-  type Markdown,
   sliceByColumn,
   stripTerminalSequences,
-  type Token,
-  type Tokens,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
+  type Markdown,
+  type Token,
+  type Tokens,
 } from '@earendil-works/pi-tui';
-import { highlightCode, peekHighlighted } from './highlight.js';
-import { style } from './theme.js';
+import { highlightCode, peekHighlighted } from './highlight.ts';
+import { style } from './theme.ts';
 
 // Markdown.renderToken 在 pi-tui 的 .d.ts 里是 private，运行时就是普通原型方法。
 // 内置代码块渲染固定输出 ``` 围栏，主题钩子去不掉；这里给实例替换渲染函数，

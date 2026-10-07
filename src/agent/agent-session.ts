@@ -1,5 +1,5 @@
-import type { Agent } from './agent.js';
-import type { AgentEvent } from './types.js';
+import type { Agent } from './agent.ts';
+import type { AgentEvent } from './types.ts';
 
 // UI 消息模型：和协议消息（AgentMessage）分离，带 id 和渲染状态
 export type TextChatMessage = {

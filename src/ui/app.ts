@@ -1,7 +1,5 @@
 import process from 'node:process';
-import chalk from 'chalk';
 import {
-  type Component,
   Container,
   Editor,
   Key,
@@ -9,16 +7,18 @@ import {
   Spacer,
   stripTerminalSequences,
   Text,
+  type Component,
   type TUI,
   type TuiInputListenerResult,
 } from '@earendil-works/pi-tui';
-import { type ChatMessage, type AgentSession } from '../agent/agent-session.js';
+import chalk from 'chalk';
+import { type AgentSession, type ChatMessage } from '../agent/agent-session.ts';
 import {
   AssistantMessageView,
   createMessageView,
   type MessageView,
-} from './message-view.js';
-import { editorTheme, style } from './theme.js';
+} from './message-view.ts';
+import { editorTheme, style } from './theme.ts';
 
 // 底部提示行
 const hintText =

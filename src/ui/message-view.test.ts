@@ -1,8 +1,8 @@
-import test from 'ava';
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui';
-import { type ChatMessage } from '../agent/agent-session.js';
-import { peekHighlighted } from './highlight.js';
-import { AssistantMessageView, createMessageView } from './message-view.js';
+import test from 'ava';
+import { type ChatMessage } from '../agent/agent-session.ts';
+import { peekHighlighted } from './highlight.ts';
+import { AssistantMessageView, createMessageView } from './message-view.ts';
 
 function plain(lines: string[]): string[] {
   return lines.map(line => stripTerminalSequences(line));
