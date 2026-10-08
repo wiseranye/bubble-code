@@ -2,8 +2,8 @@
 import process from 'node:process';
 import { ProcessTerminal, TuiMainScreen } from '@earendil-works/pi-tui';
 import meow from 'meow';
-import { AgentSession } from './agent/agent-session.ts';
 import { Agent } from './agent/agent.ts';
+import { AgentSession } from './agent/agent-session.ts';
 import { OpenAiModel } from './llm/api/openai-completions.ts';
 import {
   loadSettings,

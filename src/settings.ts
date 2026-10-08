@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import process from 'node:process';
-import { parse, printParseErrorCode, type ParseError } from 'jsonc-parser';
+import { type ParseError, parse, printParseErrorCode } from 'jsonc-parser';
 
 // 模型定义
 export type ModelDef = {
@@ -125,7 +125,7 @@ function isSettings(value: unknown): value is Settings {
 // 各平台统一：XDG_CONFIG_HOME（绝对路径时优先）→ ~/.config
 function configDirectory(): string {
   // TSConfig 的 noPropertyAccessFromIndexSignature 要求索引签名用方括号
-  // eslint-disable-next-line @typescript-eslint/dot-notation
+  // biome-ignore lint/complexity/useLiteralKeys: 同上
   const xdg = process.env['XDG_CONFIG_HOME'];
   if (xdg && isAbsolute(xdg)) {
     return xdg;

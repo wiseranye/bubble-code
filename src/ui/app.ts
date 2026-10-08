@@ -1,5 +1,6 @@
 import process from 'node:process';
 import {
+  type Component,
   Container,
   Editor,
   Key,
@@ -7,12 +8,11 @@ import {
   Spacer,
   stripTerminalSequences,
   Text,
-  type Component,
   type TUI,
   type TuiInputListenerResult,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
-import { type AgentSession, type ChatMessage } from '../agent/agent-session.ts';
+import type { AgentSession, ChatMessage } from '../agent/agent-session.ts';
 import {
   AssistantMessageView,
   createMessageView,

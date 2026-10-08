@@ -1,9 +1,9 @@
 import test from 'ava';
 import {
-  AssistantMessageEventStream,
-  MockModel,
   type AgentMessage,
   type AssistantMessage,
+  AssistantMessageEventStream,
+  MockModel,
   type Model,
   type StreamOptions,
   type Text,
@@ -11,13 +11,13 @@ import {
   type ToolCall,
 } from '../llm/types.ts';
 import { ToolRegistry } from '../tools/types.ts';
+import { Agent } from './agent.ts';
 import {
   AgentSession,
   type AgentSessionEvent,
   type TextChatMessage,
   type ToolChatMessage,
 } from './agent-session.ts';
-import { Agent } from './agent.ts';
 
 // 等条件成立，最多让出若干轮事件循环
 async function until(predicate: () => boolean): Promise<void> {
@@ -109,6 +109,7 @@ test('running a tool creates a tool message that is updated and sealed', async t
     description: 'echo',
     inputSchema: {},
     async execute(input: Record<string, unknown>) {
+      // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
       return { success: true, output: `ok: ${String(input['value'])}` };
     },
   });

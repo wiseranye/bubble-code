@@ -13,9 +13,9 @@
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc && tsc-alias",
-    "check": "prettier --check . && oxlint",
+    "check": "biome check",
     "dev": "tsc --watch",
-    "test": "prettier --check . && oxlint && npm run build && ava",
+    "test": "biome check && npm run build && ava",
     "prepublishOnly": "npm run build"
   },
   "files": [
@@ -35,13 +35,10 @@
   },
   "devDependencies": {
     "@ava/typescript": "^6.0.0",
-    "@ianvs/prettier-plugin-sort-imports": "^4.7.1",
+    "@biomejs/biome": "2.5.15",
     "@sindresorhus/tsconfig": "^3.0.1",
     "@types/node": "^26.6.4",
-    "@vdemedes/prettier-config": "^2.0.1",
     "ava": "^6.4.1",
-    "oxlint": "^1.87.0",
-    "prettier": "^2.8.7",
     "tsc-alias": "^1.9.5",
     "typescript": "^5.9.0"
   },

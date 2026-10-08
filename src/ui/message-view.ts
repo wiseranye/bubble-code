@@ -1,15 +1,15 @@
 import {
+  type Component,
   Markdown,
   Marked,
-  wrapTextWithAnsi,
-  type Component,
   type Token,
   type Tokens,
+  wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
-import {
-  type ChatMessage,
-  type TextChatMessage,
-  type ToolChatMessage,
+import type {
+  ChatMessage,
+  TextChatMessage,
+  ToolChatMessage,
 } from '../agent/agent-session.ts';
 import { withCodeBlockStyle } from './code-block.ts';
 import { highlightCode } from './highlight.ts';
@@ -110,7 +110,10 @@ export class AssistantMessageView implements MessageView {
   private text: string;
   private sealed = false;
 
-  constructor(content: string, private readonly onHighlightReady: () => void) {
+  constructor(
+    content: string,
+    private readonly onHighlightReady: () => void,
+  ) {
     this.text = content;
     this.markdown = withCodeBlockStyle(
       new Markdown(content, 0, 0, createMarkdownTheme()),

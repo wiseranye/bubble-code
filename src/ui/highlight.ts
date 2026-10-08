@@ -239,7 +239,6 @@ function tokenToAnsi(token: ThemedToken): string {
   }
 
   const fontStyle = token.fontStyle ?? 0;
-  /* eslint-disable no-bitwise -- FontStyle 是 vscode-textmate 的位标志 */
   if ((fontStyle & bold) !== 0) {
     codes.push('1');
   }
@@ -255,8 +254,6 @@ function tokenToAnsi(token: ThemedToken): string {
   if ((fontStyle & strikethrough) !== 0) {
     codes.push('9');
   }
-
-  /* eslint-enable no-bitwise */
 
   if (codes.length === 0) {
     return token.content;

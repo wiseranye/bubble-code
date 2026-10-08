@@ -1,8 +1,8 @@
 import OpenAI from 'openai';
-import { type ChatCompletionChunk } from 'openai/resources.js';
+import type { ChatCompletionChunk } from 'openai/resources.js';
 import {
-  AssistantMessageEventStream,
   type AssistantMessage,
+  AssistantMessageEventStream,
   type Message,
   type Model,
   type StopReason,

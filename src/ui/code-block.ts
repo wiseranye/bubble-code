@@ -1,12 +1,12 @@
 import {
+  type Markdown,
   sliceByColumn,
   stripTerminalSequences,
+  type Token,
+  type Tokens,
   truncateToWidth,
   visibleWidth,
   wrapTextWithAnsi,
-  type Markdown,
-  type Token,
-  type Tokens,
 } from '@earendil-works/pi-tui';
 import { highlightCode, peekHighlighted } from './highlight.ts';
 import { style } from './theme.ts';

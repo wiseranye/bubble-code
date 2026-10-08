@@ -1,7 +1,7 @@
-import {
-  type EditorTheme,
-  type MarkdownTheme,
-  type SelectListTheme,
+import type {
+  EditorTheme,
+  MarkdownTheme,
+  SelectListTheme,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 

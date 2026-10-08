@@ -30,7 +30,7 @@ node dist/cli.js
 ```bash
 pnpm build   # 清理 dist 后重新编译
 pnpm dev     # tsc --watch
-pnpm test    # prettier + xo + build + ava
+pnpm test    # biome check + build + ava
 ```
 
 ## 结构

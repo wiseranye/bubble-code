@@ -30,7 +30,7 @@ export type ToolCall = {
   type: 'tool_call';
   id: string;
   name: string;
-  input: Record<string, any>;
+  input: Record<string, unknown>;
 };
 
 export type Usage = {
@@ -188,7 +188,6 @@ export class MockModel implements Model {
 
         if (this.delay > 0) {
           // The per-token delay is intentional: it simulates streaming.
-          // eslint-disable-next-line no-await-in-loop
           await sleep(this.delay);
         }
       }

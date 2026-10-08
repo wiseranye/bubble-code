@@ -70,7 +70,7 @@ export class EventStream<T> implements AsyncIterable<T> {
     // Notify all waiting consumers that we're done
     while (this.waiting.length > 0) {
       const waiter = this.waiting.dequeue()!;
-      waiter({ value: undefined as any, done: true });
+      waiter({ value: undefined, done: true });
     }
   }
 
@@ -81,7 +81,6 @@ export class EventStream<T> implements AsyncIterable<T> {
       } else if (this.done) {
         return;
       } else {
-        // eslint-disable-next-line no-await-in-loop -- 异步迭代器只能逐个等待事件
         const result = await new Promise<IteratorResult<T>>(resolve => {
           this.waiting.enqueue(resolve);
         });

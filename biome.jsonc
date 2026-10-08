@@ -1,0 +1,59 @@
+{
+  "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
+  "files": {
+    "includes": ["**/*.ts", "!**/dist"]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "single",
+      "arrowParentheses": "asNeeded",
+      "trailingCommas": "all"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "suspicious": {
+        // 位运算默认禁止（继承自之前 oxlint 的行为），例外见 overrides
+        "noBitwiseOperators": "error"
+      },
+      "style": {
+        // 这些 `!` 都是算法上可证明非空的（队列 pop、定长字节数组），之前 oxlint 也不报
+        "noNonNullAssertion": "off"
+      }
+    }
+  },
+  "assist": {
+    "enabled": true,
+    "actions": {
+      "source": {
+        // import 排序：node 内置 -> 第三方 -> 相对路径（与之前 @ianvs/prettier-plugin-sort-imports 的分组一致）
+        "organizeImports": {
+          "level": "on",
+          "options": {
+            "groups": [":NODE:", ":PACKAGE:", ":PATH:"]
+          }
+        }
+      }
+    }
+  },
+  "overrides": [
+    {
+      // uuid.ts：UUID v7 的字节打包本质就是位运算；highlight.ts：vscode-textmate 的 FontStyle 是位标志
+      "includes": ["src/utils/uuid.ts", "src/ui/highlight.ts"],
+      "linter": {
+        "rules": {
+          "suspicious": {
+            "noBitwiseOperators": "off"
+          }
+        }
+      }
+    }
+  ]
+}

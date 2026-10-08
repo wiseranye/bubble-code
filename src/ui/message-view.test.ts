@@ -1,6 +1,6 @@
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui';
 import test from 'ava';
-import { type ChatMessage } from '../agent/agent-session.ts';
+import type { ChatMessage } from '../agent/agent-session.ts';
 import { peekHighlighted } from './highlight.ts';
 import { AssistantMessageView, createMessageView } from './message-view.ts';
 
