@@ -60,7 +60,11 @@ export function createMessageView(
 }
 
 class SystemMessageView implements MessageView {
-  constructor(private message: TextChatMessage) {}
+  private message: TextChatMessage;
+
+  constructor(message: TextChatMessage) {
+    this.message = message;
+  }
 
   update(message: ChatMessage): void {
     if (message.role === 'system') {
@@ -80,7 +84,11 @@ class SystemMessageView implements MessageView {
 }
 
 class UserMessageView implements MessageView {
-  constructor(private message: TextChatMessage) {}
+  private message: TextChatMessage;
+
+  constructor(message: TextChatMessage) {
+    this.message = message;
+  }
 
   update(message: ChatMessage): void {
     if (message.role === 'user') {
@@ -109,12 +117,11 @@ export class AssistantMessageView implements MessageView {
   private readonly markdown: Markdown;
   private text: string;
   private sealed = false;
+  private readonly onHighlightReady: () => void;
 
-  constructor(
-    content: string,
-    private readonly onHighlightReady: () => void,
-  ) {
+  constructor(content: string, onHighlightReady: () => void) {
     this.text = content;
+    this.onHighlightReady = onHighlightReady;
     this.markdown = withCodeBlockStyle(
       new Markdown(content, 0, 0, createMarkdownTheme()),
       () => {
@@ -170,7 +177,11 @@ export class AssistantMessageView implements MessageView {
 
 // 思考过程：暗色渲染，默认折叠成前几行，不和正文抢注意力
 class ThinkingMessageView implements MessageView {
-  constructor(private message: TextChatMessage) {}
+  private message: TextChatMessage;
+
+  constructor(message: TextChatMessage) {
+    this.message = message;
+  }
 
   update(message: ChatMessage): void {
     if (message.role === 'thinking') {
@@ -202,7 +213,11 @@ class ThinkingMessageView implements MessageView {
 }
 
 class ToolMessageView implements MessageView {
-  constructor(private message: ToolChatMessage) {}
+  private message: ToolChatMessage;
+
+  constructor(message: ToolChatMessage) {
+    this.message = message;
+  }
 
   update(message: ChatMessage): void {
     if (message.role === 'tool') {

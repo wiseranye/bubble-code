@@ -2,6 +2,8 @@
   "extends": "@sindresorhus/tsconfig",
   "compilerOptions": {
     "outDir": "dist",
+    // TS7 不再推断 rootDir，显式声明保持 dist 布局不变
+    "rootDir": "src",
     "target": "ES2022",
     "lib": ["ES2022"],
     // 项目内 import 只使用带 .ts 扩展名的相对路径，emit 时由 tsc 重写为 .js

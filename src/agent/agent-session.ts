@@ -45,7 +45,10 @@ export class AgentSession {
   // 键为 toolCallId、值为 Chat message id，用来把 tool_result 贴回对应的工具消息
   private readonly toolBlocks = new Map<string, number>();
 
-  constructor(private readonly agent: Agent) {
+  private readonly agent: Agent;
+
+  constructor(agent: Agent) {
+    this.agent = agent;
     agent.subscribe(event => {
       this.handleAgentEvent(event);
     });

@@ -286,8 +286,11 @@ type ScriptTurn = {
 // 按剧本逐轮回放 StreamChunkEvent；每次 stream 调用消费一轮
 class ScriptedModel implements Model {
   private index = 0;
+  private readonly script: ScriptTurn[];
 
-  constructor(private readonly script: ScriptTurn[]) {}
+  constructor(script: ScriptTurn[]) {
+    this.script = script;
+  }
 
   stream(
     _messages: AgentMessage[],

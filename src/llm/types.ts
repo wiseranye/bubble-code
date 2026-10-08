@@ -152,7 +152,11 @@ export class AssistantMessageEventStream extends EventStream<StreamChunkEvent> {
 // streams a canned reply token-by-token so the UI behaves like a real
 // streaming agent.
 export class MockModel implements Model {
-  constructor(private readonly delay: number = 20) {}
+  private readonly delay: number;
+
+  constructor(delay: number = 20) {
+    this.delay = delay;
+  }
 
   stream(_: Message[]): AssistantMessageEventStream {
     const stream = new AssistantMessageEventStream();
