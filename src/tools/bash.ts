@@ -1,28 +1,30 @@
 import { execa } from 'execa';
+import Type from 'typebox';
 import type { Tool, ToolResult } from './types.ts';
 
 // Bash 输入
-export type BashInput = {
-  command: string;
-};
+const bashInputSchema = Type.Object({
+  command: Type.String(),
+});
 
 // Bash 命令执行超时时间
 const bashExecuteTimeout = 30_000;
 
-export const bashTool: Tool<BashInput> = {
+export const bashTool: Tool<typeof bashInputSchema> = {
   name: 'bash',
   description: '当需要执行bash命令的时候使用',
-  inputSchema: {
-    type: 'object',
-    properties: {
-      command: {
-        type: 'string',
-        description: '待执行的Bash命令',
-      },
-    },
-    required: ['command'],
-    additionalProperties: false,
-  },
+  // inputSchema: {
+  //   type: 'object',
+  //   properties: {
+  //     command: {
+  //       type: 'string',
+  //       description: '待执行的Bash命令',
+  //     },
+  //   },
+  //   required: ['command'],
+  //   additionalProperties: false,
+  // },
+  inputSchema: bashInputSchema,
   async execute(input): Promise<ToolResult> {
     const result = await execa('bash', ['-lc', input.command], {
       reject: false,

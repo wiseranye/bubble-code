@@ -1,5 +1,5 @@
 import OpenAI from 'openai';
-import type { ChatCompletionChunk } from 'openai/resources.js';
+import type { ChatCompletionChunk, FunctionParameters } from 'openai/resources.js';
 import {
   type AssistantMessage,
   AssistantMessageEventStream,
@@ -11,6 +11,7 @@ import {
   type Thinking,
   type ToolCall,
 } from '../types.ts';
+import { AnyTool } from '../../tools/types.ts';
 
 // OpenAI 的工具调用分片只有 index 稳定，其余字段可能只在一部分分片里出现
 type ToolCallDelta = {
@@ -82,7 +83,7 @@ export class OpenAiModel implements Model {
         function: {
           name: tool.name,
           description: tool.description,
-          parameters: tool.inputSchema,
+          parameters: this.makeJsonSchemaToolParameters(tool),
         },
       }),
     );
@@ -207,7 +208,7 @@ export class OpenAiModel implements Model {
           name: delta.function?.name ?? '',
           input: {},
           streamIndex: delta.index,
-          partialArgs: delta.function?.arguments ?? '',
+          partialArgs: '',
         };
         indexedToolCallBlocks.set(block.streamIndex!, block);
         blocks.push(block);
@@ -487,5 +488,9 @@ export class OpenAiModel implements Model {
       content: content.length > 0 ? content : null,
       ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     };
+  }
+
+  private makeJsonSchemaToolParameters(tool: AnyTool): FunctionParameters {
+    return tool.inputSchema as FunctionParameters;
   }
 }
