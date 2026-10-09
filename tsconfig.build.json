@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    // TS7 不再推断 rootDir，显式声明保持 dist 布局不变
+    "rootDir": "src",
+    // emit 时把 .ts 扩展名重写为 .js（为 true 时 allowImportingTsExtensions 自动为 true）
+    "rewriteRelativeImportExtensions": true
+  },
+  "include": ["src"]
+}

@@ -1,5 +1,9 @@
 import OpenAI from 'openai';
-import type { ChatCompletionChunk, FunctionParameters } from 'openai/resources.js';
+import type {
+  ChatCompletionChunk,
+  FunctionParameters,
+} from 'openai/resources.js';
+import type { AnyTool } from '../../tools/types.ts';
 import {
   type AssistantMessage,
   AssistantMessageEventStream,
@@ -11,7 +15,6 @@ import {
   type Thinking,
   type ToolCall,
 } from '../types.ts';
-import { AnyTool } from '../../tools/types.ts';
 
 // OpenAI 的工具调用分片只有 index 稳定，其余字段可能只在一部分分片里出现
 type ToolCallDelta = {

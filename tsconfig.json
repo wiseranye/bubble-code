@@ -1,16 +1,13 @@
 {
   "extends": "@sindresorhus/tsconfig",
   "compilerOptions": {
-    "outDir": "dist",
-    // TS7 不再推断 rootDir，显式声明保持 dist 布局不变
-    "rootDir": "src",
+    "noEmit": true,
     "target": "ES2022",
     "lib": ["ES2022"],
-    // 项目内 import 只使用带 .ts 扩展名的相对路径，emit 时由 tsc 重写为 .js
-    // （rewriteRelativeImportExtensions 为 true 时 allowImportingTsExtensions 自动为 true）
-    "rewriteRelativeImportExtensions": true
+    // 项目内 import 只使用带 .ts 扩展名的相对路径，emit 时由 tsconfig.build.json 重写为 .js
+    "allowImportingTsExtensions": true
   },
-  "include": ["src"],
+  "include": ["src", "test"],
   "exports": {
     ".": {
       "types": "./src/index.ts",

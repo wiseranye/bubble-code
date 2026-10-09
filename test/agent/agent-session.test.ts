@@ -1,4 +1,11 @@
-import test from 'ava';
+import { expect, test } from 'vitest';
+import { Agent } from '../../src/agent/agent.ts';
+import {
+  AgentSession,
+  type AgentSessionEvent,
+  type TextChatMessage,
+  type ToolChatMessage,
+} from '../../src/agent/agent-session.ts';
 import {
   type AgentMessage,
   type AssistantMessage,
@@ -9,15 +16,8 @@ import {
   type Text,
   type Thinking,
   type ToolCall,
-} from '../llm/types.ts';
-import { ToolRegistry } from '../tools/types.ts';
-import { Agent } from './agent.ts';
-import {
-  AgentSession,
-  type AgentSessionEvent,
-  type TextChatMessage,
-  type ToolChatMessage,
-} from './agent-session.ts';
+} from '../../src/llm/types.ts';
+import { ToolRegistry } from '../../src/tools/types.ts';
 
 // 等条件成立，最多让出若干轮事件循环
 async function until(predicate: () => boolean): Promise<void> {
@@ -26,7 +26,6 @@ async function until(predicate: () => boolean): Promise<void> {
       return;
     }
 
-    // eslint-disable-next-line no-await-in-loop -- 轮询等待，本来就是顺序的
     await new Promise<void>(resolve => {
       setImmediate(resolve);
     });
@@ -53,7 +52,7 @@ function assistantMessages(session: AgentSession): TextChatMessage[] {
   );
 }
 
-test('streams assistant text and seals both messages', async t => {
+test('streams assistant text and seals both messages', async () => {
   const agent = new Agent({
     model: new MockModel(0),
     tools: new ToolRegistry(),
@@ -61,48 +60,48 @@ test('streams assistant text and seals both messages', async t => {
   const session = new AgentSession(agent);
   const events = record(session);
 
-  t.is(session.messages.length, 1);
-  t.is(session.messages[0]?.role, 'system');
+  expect(session.messages.length).toBe(1);
+  expect(session.messages[0]?.role).toBe('system');
 
   session.prompt('你好');
-  t.true(session.isStreaming);
+  expect(session.isStreaming).toBe(true);
 
   await until(() => !session.isStreaming);
 
   // 用户消息：added 后立刻 sealed
-  t.true(
+  expect(
     events.some(
       event => event.type === 'message_added' && event.message.role === 'user',
     ),
-  );
-  t.true(
+  ).toBe(true);
+  expect(
     events.some(
       event => event.type === 'message_sealed' && event.message.role === 'user',
     ),
-  );
+  ).toBe(true);
 
   // 助手消息：added（首个增量）→ updated（后续增量）→ sealed（收尾）
   const assistant = assistantMessages(session)[0];
-  t.truthy(assistant);
-  t.true((assistant?.content ?? '').includes('mock reply'));
-  t.true(
+  expect(assistant).toBeTruthy();
+  expect((assistant?.content ?? '').includes('mock reply')).toBe(true);
+  expect(
     events.some(
       event =>
         event.type === 'message_updated' && event.message.role === 'assistant',
     ),
-  );
-  t.true(
+  ).toBe(true);
+  expect(
     events.some(
       event =>
         event.type === 'message_sealed' && event.message.role === 'assistant',
     ),
-  );
+  ).toBe(true);
 
   // Streaming 开关严格成对
-  t.deepEqual(streamingFlags(events), [true, false]);
+  expect(streamingFlags(events)).toEqual([true, false]);
 });
 
-test('running a tool creates a tool message that is updated and sealed', async t => {
+test('running a tool creates a tool message that is updated and sealed', async () => {
   const registry = new ToolRegistry();
   registry.register({
     name: 'echo',
@@ -131,36 +130,36 @@ test('running a tool creates a tool message that is updated and sealed', async t
   const tools = session.messages.filter(
     (message): message is ToolChatMessage => message.role === 'tool',
   );
-  t.is(tools.length, 1);
-  t.is(tools[0]?.status, 'done');
-  t.true(tools[0]?.success);
-  t.is(tools[0]?.output, 'ok: hi');
-  t.is(tools[0]?.input, '{"value":"hi"}');
+  expect(tools.length).toBe(1);
+  expect(tools[0]?.status).toBe('done');
+  expect(tools[0]?.success).toBe(true);
+  expect(tools[0]?.output).toBe('ok: hi');
+  expect(tools[0]?.input).toBe('{"value":"hi"}');
 
   // 工具开始前，前一段文本已冻结；工具结果回来后再冻结工具消息
-  t.true(
+  expect(
     events.some(
       event =>
         event.type === 'message_sealed' &&
         event.message.role === 'assistant' &&
         event.message.content === '让我看看。',
     ),
-  );
-  t.true(
+  ).toBe(true);
+  expect(
     events.some(
       event => event.type === 'message_sealed' && event.message.role === 'tool',
     ),
-  );
+  ).toBe(true);
 
   // 工具调用之后的文本是新的一条助手消息
   const assistants = assistantMessages(session);
-  t.is(assistants.length, 2);
-  t.is(assistants[1]?.content, '完成了。');
+  expect(assistants.length).toBe(2);
+  expect(assistants[1]?.content).toBe('完成了。');
 
-  t.deepEqual(streamingFlags(events), [true, false]);
+  expect(streamingFlags(events)).toEqual([true, false]);
 });
 
-test('thinking deltas accumulate into a separate dim message', async t => {
+test('thinking deltas accumulate into a separate dim message', async () => {
   const model = new ScriptedModel([{ thinking: '先想想。', text: '答案。' }]);
   const agent = new Agent({ model, tools: new ToolRegistry() });
   const session = new AgentSession(agent);
@@ -172,22 +171,22 @@ test('thinking deltas accumulate into a separate dim message', async t => {
   const thinking = session.messages.find(
     (message): message is TextChatMessage => message.role === 'thinking',
   );
-  t.is(thinking?.content, '先想想。');
+  expect(thinking?.content).toBe('先想想。');
   // 正文和思考是两条独立消息，思考在正文之前
   const assistant = assistantMessages(session)[0];
-  t.is(assistant?.content, '答案。');
-  t.true(
+  expect(assistant?.content).toBe('答案。');
+  expect(
     session.messages.indexOf(thinking!) < session.messages.indexOf(assistant!),
-  );
-  t.true(
+  ).toBe(true);
+  expect(
     events.some(
       event =>
         event.type === 'message_sealed' && event.message.role === 'thinking',
     ),
-  );
+  ).toBe(true);
 });
 
-test('cancel seals the partial assistant text and appends an interrupt notice', async t => {
+test('cancel seals the partial assistant text and appends an interrupt notice', async () => {
   const agent = new Agent({
     model: new HangingModel(),
     tools: new ToolRegistry(),
@@ -205,40 +204,40 @@ test('cancel seals the partial assistant text and appends an interrupt notice', 
 
   // 残缺的 assistant 文本原样封合，不掺入任何提示文字
   const assistant = assistantMessages(session)[0];
-  t.is(assistant?.content, 'partial');
-  t.true(
+  expect(assistant?.content).toBe('partial');
+  expect(
     events.some(
       event =>
         event.type === 'message_sealed' && event.message.role === 'assistant',
     ),
-  );
+  ).toBe(true);
 
   // 中断提示是独立的一条 system 消息，跟在残缺文本之后
   const notice = session.messages.find(
     (message): message is TextChatMessage =>
       message.role === 'system' && message.content.includes('[已中断]'),
   );
-  t.is(notice?.content, '[已中断] 用户按 ESC 取消了本次生成');
-  t.true(
+  expect(notice?.content).toBe('[已中断] 用户按 ESC 取消了本次生成');
+  expect(
     session.messages.indexOf(notice!) > session.messages.indexOf(assistant!),
-  );
-  t.true(
+  ).toBe(true);
+  expect(
     events.some(
       event =>
         event.type === 'message_added' && event.message.id === notice?.id,
     ),
-  );
-  t.true(
+  ).toBe(true);
+  expect(
     events.some(
       event =>
         event.type === 'message_sealed' && event.message.id === notice?.id,
     ),
-  );
+  ).toBe(true);
 
-  t.deepEqual(streamingFlags(events), [true, false]);
+  expect(streamingFlags(events)).toEqual([true, false]);
 });
 
-test('provider error surfaces as an assistant message', async t => {
+test('provider error surfaces as an assistant message', async () => {
   const agent = new Agent({
     model: new FailingModel(),
     tools: new ToolRegistry(),
@@ -250,11 +249,11 @@ test('provider error surfaces as an assistant message', async t => {
   await until(() => !session.isStreaming);
 
   const assistant = assistantMessages(session)[0];
-  t.true((assistant?.content ?? '').includes('[出错] boom'));
-  t.deepEqual(streamingFlags(events), [true, false]);
+  expect((assistant?.content ?? '').includes('[出错] boom')).toBe(true);
+  expect(streamingFlags(events)).toEqual([true, false]);
 });
 
-test('send is ignored while generating and for empty input', async t => {
+test('send is ignored while generating and for empty input', async () => {
   const agent = new Agent({
     model: new HangingModel(),
     tools: new ToolRegistry(),
@@ -262,12 +261,14 @@ test('send is ignored while generating and for empty input', async t => {
   const session = new AgentSession(agent);
 
   session.prompt('   ');
-  t.false(session.isStreaming);
+  expect(session.isStreaming).toBe(false);
 
   session.prompt('第一次');
-  t.true(session.isStreaming);
+  expect(session.isStreaming).toBe(true);
   session.prompt('第二次');
-  t.is(session.messages.filter(message => message.role === 'user').length, 1);
+  expect(
+    session.messages.filter(message => message.role === 'user').length,
+  ).toBe(1);
 
   session.cancel();
   await until(() => !session.isStreaming);
