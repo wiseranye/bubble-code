@@ -1,4 +1,3 @@
-import { setTimeout as sleep } from 'node:timers/promises';
 import type { AnyTool } from '../tools/types.ts';
 import { EventStream } from '../utils/event-stream.ts';
 
@@ -145,62 +144,5 @@ export class AssistantMessageEventStream extends EventStream<StreamChunkEvent> {
   constructor() {
     // done / error 事件即流结束
     super(event => event.type === 'done' || event.type === 'error');
-  }
-}
-
-// A mock implementation used until a real model backend is wired up. It
-// streams a canned reply token-by-token so the UI behaves like a real
-// streaming agent.
-export class MockModel implements Model {
-  private readonly delay: number;
-
-  constructor(delay: number = 20) {
-    this.delay = delay;
-  }
-
-  stream(_: Message[]): AssistantMessageEventStream {
-    const stream = new AssistantMessageEventStream();
-
-    (async () => {
-      const output: AssistantMessage = {
-        role: 'assistant',
-        content: [],
-        stopReason: 'stop',
-        timestamp: Date.now(),
-      };
-
-      const reply = `mock reply: 这是虚假的回复`;
-      const block: Text = { type: 'text', text: '' };
-      output.content.push(block);
-
-      stream.push({ type: 'start', partial: output });
-      stream.push({ type: 'text_start', index: 0, partial: output });
-
-      for (const token of reply.split(/(\s+)/)) {
-        if (token === '') {
-          continue;
-        }
-
-        block.text += token;
-
-        stream.push({
-          type: 'text_delta',
-          index: 0,
-          delta: token,
-          partial: output,
-        });
-
-        if (this.delay > 0) {
-          // The per-token delay is intentional: it simulates streaming.
-          await sleep(this.delay);
-        }
-      }
-
-      stream.push({ type: 'text_end', index: 0, text: block, partial: output });
-      stream.push({ type: 'done', reason: 'stop', message: output });
-      stream.end();
-    })();
-
-    return stream;
   }
 }

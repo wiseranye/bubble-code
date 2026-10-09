@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { expect, test } from 'vitest';
 import { Agent } from '../../src/agent/agent.ts';
 import {
@@ -10,7 +11,7 @@ import {
   type AgentMessage,
   type AssistantMessage,
   AssistantMessageEventStream,
-  MockModel,
+  type Message,
   type Model,
   type StreamOptions,
   type Text,
@@ -18,6 +19,63 @@ import {
   type ToolCall,
 } from '../../src/llm/types.ts';
 import { ToolRegistry } from '../../src/tools/types.ts';
+
+// A mock implementation used until a real model backend is wired up. It
+// streams a canned reply token-by-token so the UI behaves like a real
+// streaming agent.
+class MockModel implements Model {
+  private readonly delay: number;
+
+  constructor(delay: number = 20) {
+    this.delay = delay;
+  }
+
+  stream(_: Message[]): AssistantMessageEventStream {
+    const stream = new AssistantMessageEventStream();
+
+    (async () => {
+      const output: AssistantMessage = {
+        role: 'assistant',
+        content: [],
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      };
+
+      const reply = `mock reply: 这是虚假的回复`;
+      const block: Text = { type: 'text', text: '' };
+      output.content.push(block);
+
+      stream.push({ type: 'start', partial: output });
+      stream.push({ type: 'text_start', index: 0, partial: output });
+
+      for (const token of reply.split(/(\s+)/)) {
+        if (token === '') {
+          continue;
+        }
+
+        block.text += token;
+
+        stream.push({
+          type: 'text_delta',
+          index: 0,
+          delta: token,
+          partial: output,
+        });
+
+        if (this.delay > 0) {
+          // The per-token delay is intentional: it simulates streaming.
+          await sleep(this.delay);
+        }
+      }
+
+      stream.push({ type: 'text_end', index: 0, text: block, partial: output });
+      stream.push({ type: 'done', reason: 'stop', message: output });
+      stream.end();
+    })();
+
+    return stream;
+  }
+}
 
 // 等条件成立，最多让出若干轮事件循环
 async function until(predicate: () => boolean): Promise<void> {
