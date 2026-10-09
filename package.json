@@ -10,12 +10,12 @@
   "engines": {
     "node": ">=22.19.0"
   },
+  "packageManager": "pnpm@12.10.1",
   "scripts": {
     "clean": "rm -rf dist",
     "build": "npm run clean && tsc -p tsconfig.build.json && tsc-alias -p tsconfig.build.json",
-    "check": "biome check",
-    "dev": "tsc -p tsconfig.build.json --watch",
-    "test": "biome check && npm run build && vitest run",
+    "check": "tsc --noEmit && biome check",
+    "test": "npm run check && npm run build && vitest run",
     "prepublishOnly": "npm run build"
   },
   "files": [
