@@ -69,8 +69,7 @@ async function main(): Promise<void> {
   });
   const terminal = new ProcessTerminal();
   const tui = new TuiMainScreen(terminal);
-  const session = new AgentSession(agent);
-  createChatApp(tui, session);
+  createChatApp(tui, () => new AgentSession(agent));
   tui.start();
 }
 

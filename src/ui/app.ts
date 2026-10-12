@@ -3,8 +3,10 @@ import {
   type Component,
   Container,
   Editor,
+  getKeybindings,
   Key,
   matchesKey,
+  type SelectList,
   Spacer,
   stripTerminalSequences,
   Text,
@@ -12,30 +14,38 @@ import {
   type TuiInputListenerResult,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
-import type { AgentSession, ChatMessage } from '../agent/agent-session.ts';
+import type {
+  AgentSession,
+  AgentSessionEvent,
+  ChatMessage,
+} from '../agent/agent-session.ts';
 import {
   AssistantMessageView,
   createMessageView,
   type MessageView,
 } from './message-view.ts';
+import {
+  matchSlashCommand,
+  SlashCommandAutocomplete,
+  type SlashCommandInvocation,
+  slashCommandTakesArgument,
+} from './slash-command.ts';
 import { editorTheme, style } from './theme.ts';
 
 // 底部提示行
 const hintText =
-  'Enter 发送 · Shift+Enter 换行 · ↑↓ 历史 · Ctrl+U 清空 · Esc 取消 · Ctrl+C 退出';
+  'Enter 发送 · Shift+Enter 换行 · / 命令 · ↑↓ 历史 · Ctrl+U 清空 · Esc 取消 · Ctrl+C 退出';
 
-export function createChatApp(tui: TUI, session: AgentSession): void {
+export function createChatApp(
+  tui: TUI,
+  createSession: () => AgentSession,
+): void {
   const messageArea = new Container();
   const indicatorSlot = new Container();
   const views = new Map<number, MessageView>();
   let indicator: BubblingIndicator | undefined;
 
-  const editor = new PromptEditor(tui, editorTheme, { paddingX: 2 });
-  editor.onSubmit = text => {
-    session.prompt(text);
-  };
-
-  editor.disableSubmit = session.isStreaming;
+  let session = createSession();
 
   const addMessage = (message: ChatMessage): void => {
     const view = createMessageView(message, () => tui.requestRender());
@@ -88,21 +98,7 @@ export function createChatApp(tui: TUI, session: AgentSession): void {
     return undefined;
   };
 
-  // 已有的消息（欢迎语）在订阅之前就存在，直接补建视图
-  for (const message of session.messages) {
-    addMessage(message);
-  }
-
-  const root = new Container();
-  root.addChild(messageArea);
-  root.addChild(indicatorSlot);
-  root.addChild(editor);
-  root.addChild(new Text(style.dim(hintText), 1, 0));
-  tui.addChild(root);
-  tui.setFocus(editor);
-  tui.addInputListener(handleKey);
-
-  session.subscribe(event => {
+  const handleSessionEvent = (event: AgentSessionEvent): void => {
     switch (event.type) {
       case 'message_added': {
         addMessage(event.message);
@@ -130,7 +126,81 @@ export function createChatApp(tui: TUI, session: AgentSession): void {
     }
 
     tui.requestRender();
-  });
+  };
+
+  let unsubscribeSession = (): void => {};
+
+  // 重新绑定会话：退订旧会话，清空视图，订阅新会话并补建已有消息（欢迎语）
+  const bindSession = (): void => {
+    unsubscribeSession();
+    views.clear();
+    messageArea.clear();
+    unsubscribeSession = session.subscribe(handleSessionEvent);
+    for (const message of session.messages) {
+      addMessage(message);
+    }
+
+    tui.requestRender();
+  };
+
+  // 斜杠命令的执行入口，UI 只负责分发到这里
+  const runSlashCommand = (
+    invocation: SlashCommandInvocation,
+    text: string,
+  ): void => {
+    switch (invocation.command.name) {
+      case 'new': {
+        if (session.isStreaming) {
+          session.notify('请等待当前会话结束');
+          break;
+        }
+
+        session.dispose();
+        session = createSession();
+        bindSession();
+        break;
+      }
+
+      case 'quit': {
+        tui.stop();
+        process.exit(0);
+        // process.exit 不会返回，break 只是为了过 lint
+        break;
+      }
+
+      default: {
+        // 未实现的命令按普通输入处理，/ 开头的提示词照常发给模型
+        session.prompt(text);
+        break;
+      }
+    }
+  };
+
+  const editor = new PromptEditor(tui, editorTheme, { paddingX: 2 });
+  editor.setAutocompleteProvider(new SlashCommandAutocomplete());
+  editor.onSubmit = text => {
+    const invocation = matchSlashCommand(text);
+    if (invocation !== undefined) {
+      runSlashCommand(invocation, text);
+      return;
+    }
+
+    session.prompt(text);
+  };
+
+  editor.disableSubmit = session.isStreaming;
+
+  const root = new Container();
+  root.addChild(messageArea);
+  root.addChild(indicatorSlot);
+  root.addChild(editor);
+  root.addChild(new Text(style.dim(hintText), 1, 0));
+  tui.addChild(root);
+  tui.setFocus(editor);
+  tui.addInputListener(handleKey);
+
+  // 已有的消息（欢迎语）在订阅之前就存在，bindSession 里直接补建视图
+  bindSession();
 }
 
 // 四边框输入框，首行内容区左侧 padding 放提示符，像 shell 的 prompt。
@@ -169,6 +239,42 @@ class PromptEditor extends Editor {
           : line;
       return `${this.borderColor('│')}${content}${this.borderColor('│')}`;
     });
+  }
+
+  override handleInput(data: string): void {
+    // 带参数的命令（如 /rename）在弹层里回车只补全命令名，不提交，留给用户输入参数。
+    // Editor 原生对 / 前缀的补全回车会顺带提交，这里把回车换成 Tab 的行为
+    const keybindings = getKeybindings();
+    if (
+      keybindings.matches(data, 'tui.select.confirm') &&
+      this.isShowingAutocomplete()
+    ) {
+      // autocompleteList 是 Editor 的私有字段，这里和 render 一样只做读取
+      const list = (this as unknown as { autocompleteList?: SelectList })
+        .autocompleteList;
+      const selected = list?.getSelectedItem();
+      if (selected !== null && selected !== undefined) {
+        if (slashCommandTakesArgument(selected.value)) {
+          super.handleInput('\t');
+          return;
+        }
+      }
+    }
+
+    // 生成中禁止提交普通消息，但斜杠命令放行：
+    // 命令能不能执行由 runSlashCommand 判断（比如 /new 会提示等待当前会话结束）
+    if (
+      this.disableSubmit &&
+      keybindings.matches(data, 'tui.input.submit') &&
+      this.getText().trimStart().startsWith('/')
+    ) {
+      this.disableSubmit = false;
+      super.handleInput(data);
+      this.disableSubmit = true;
+      return;
+    }
+
+    super.handleInput(data);
   }
 
   override handleMouse(

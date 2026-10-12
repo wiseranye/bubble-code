@@ -46,10 +46,11 @@ export class AgentSession {
   private readonly toolBlocks = new Map<string, number>();
 
   private readonly agent: Agent;
+  private readonly unsubscribeAgent: () => void;
 
   constructor(agent: Agent) {
     this.agent = agent;
-    agent.subscribe(event => {
+    this.unsubscribeAgent = agent.subscribe(event => {
       this.handleAgentEvent(event);
     });
     // 欢迎语在 UI 订阅之前就存在，启动时直接补建视图
@@ -102,6 +103,16 @@ export class AgentSession {
   cancel(): void {
     // 只中断本次 run；和 agent 的订阅关系是长期的，不能动
     this.abortController?.abort();
+  }
+
+  // 给用户的即时系统提示（比如命令不可用的原因），不发给模型
+  notify(content: string): void {
+    this.appendSystemMessage(content);
+  }
+
+  // /new 替换会话时调用：退订 agent 事件，旧会话不再接收任何后续事件
+  dispose(): void {
+    this.unsubscribeAgent();
   }
 
   private async run(
