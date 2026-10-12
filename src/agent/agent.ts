@@ -1,29 +1,31 @@
 // 有状态门面
 
-import type { AgentMessage, Model } from '../llm/types.ts';
+import type { Model } from '../llm/types.ts';
 import type { ToolRegistry } from '../tools/types.ts';
 import { runAgentLoop } from './agent-loop.ts';
 import { systemPrompt } from './constants.ts';
-import type { AgentContext, AgentEvent } from './types.ts';
+import type { AgentContext, AgentEvent, AgentState } from './types.ts';
 
-export type AgentOptions = {
+export interface AgentOptions {
   model: Model;
   tools: ToolRegistry;
-};
+}
 
 export class Agent {
-  private readonly model: Model;
-  private readonly tools: ToolRegistry;
-  private readonly messages: AgentMessage[] = [];
+  private readonly _state: AgentState;
+  private readonly _tools: ToolRegistry;
 
-  private readonly listeners = new Set<
+  private readonly _listeners = new Set<
     (event: AgentEvent, signal?: AbortSignal) => Promise<void> | void
   >();
 
   constructor({ model, tools }: AgentOptions) {
-    this.model = model;
-    this.tools = tools;
-    this.messages.push({
+    this._tools = tools;
+    this._state = {
+      model: model,
+      messages: [],
+    };
+    this._state.messages.push({
       role: 'system',
       content: systemPrompt,
     });
@@ -32,9 +34,13 @@ export class Agent {
   subscribe(
     listener: (event: AgentEvent, signal?: AbortSignal) => Promise<void> | void,
   ): () => void {
-    this.listeners.add(listener);
+    this._listeners.add(listener);
     // 取消订阅
-    return () => this.listeners.delete(listener);
+    return () => this._listeners.delete(listener);
+  }
+
+  get state(): AgentState {
+    return this._state;
   }
 
   async prompt(
@@ -42,25 +48,25 @@ export class Agent {
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<void> {
     const context: AgentContext = {
-      tools: this.tools,
-      messages: this.messages,
+      tools: this._tools,
+      messages: this._state.messages,
     };
     const newMessages = await runAgentLoop(
       input,
       context,
-      async event => this.onEvent(event, signal),
-      this.model,
+      async event => this._onEvent(event, signal),
+      this._state.model,
       signal,
     );
 
-    this.messages.push(...newMessages);
+    this._state.messages.push(...newMessages);
   }
 
-  private async onEvent(
+  private async _onEvent(
     event: AgentEvent,
     signal?: AbortSignal,
   ): Promise<void> {
-    for (const listener of this.listeners) {
+    for (const listener of this._listeners) {
       // eslint-disable-next-line no-await-in-loop -- 监听器按订阅顺序逐个通知
       await listener(event, signal);
     }

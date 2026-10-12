@@ -1,5 +1,6 @@
 import type {
   AgentMessage,
+  Model,
   Text,
   Thinking,
   ToolCall,
@@ -44,3 +45,9 @@ export type AgentContext = {
   // 会话中所有的消息
   messages: AgentMessage[];
 };
+
+export interface AgentState {
+  model: Model;
+  set messages(messages: AgentMessage[]);
+  get messages(): AgentMessage[];
+}
