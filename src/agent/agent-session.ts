@@ -1,4 +1,5 @@
 import type { Agent } from './agent.ts';
+import { SessionManager } from './session-manager.ts';
 import type { AgentEvent } from './types.ts';
 
 // UI 消息模型：和协议消息（AgentMessage）分离，带 id 和渲染状态
@@ -48,6 +49,8 @@ export class AgentSession {
   private readonly agent: Agent;
   private readonly unsubscribeAgent: () => void;
 
+  private readonly sessionManager: SessionManager;
+
   constructor(agent: Agent) {
     this.agent = agent;
     this.unsubscribeAgent = agent.subscribe(event => {
@@ -59,6 +62,7 @@ export class AgentSession {
       role: 'system',
       content: 'Bubble Code — 输入问题，Enter 发送。',
     });
+    this.sessionManager = new SessionManager(process.cwd());
   }
 
   get messages(): readonly ChatMessage[] {
@@ -113,12 +117,18 @@ export class AgentSession {
   // /new 替换会话时调用：退订 agent 事件，旧会话不再接收任何后续事件
   dispose(): void {
     this.unsubscribeAgent();
+    this.sessionManager.close();
   }
 
   private async run(
     content: string,
     controller: AbortController,
   ): Promise<void> {
+    this.sessionManager.appendMessage({
+      role: 'user',
+      content: content,
+      timestamp: Date.now(),
+    });
     try {
       await this.agent.prompt(content, { signal: controller.signal });
     } catch (error: unknown) {
@@ -135,7 +145,7 @@ export class AgentSession {
     }
   }
 
-  private handleAgentEvent(event: AgentEvent): void {
+  private handleAgentEvent(event: AgentEvent) {
     switch (event.type) {
       case 'text_delta': {
         this.appendText('assistant', event.delta);
@@ -187,12 +197,19 @@ export class AgentSession {
           this.emit({ type: 'message_sealed', message: updated });
         }
 
+        if (event.result) {
+          this.sessionManager.appendMessage(event.result);
+        }
+
         break;
       }
 
       case 'turn_end': {
         // 一轮结束：冻结当前段，下一轮的文本另起一条消息
         this.sealOpenBlock();
+        if (event.message) {
+          this.sessionManager.appendMessage(event.message);
+        }
         break;
       }
 

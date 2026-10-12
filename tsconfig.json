@@ -5,7 +5,8 @@
     "target": "ES2022",
     "lib": ["ES2022"],
     // 项目内 import 只使用带 .ts 扩展名的相对路径，emit 时由 tsconfig.build.json 重写为 .js
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "noPropertyAccessFromIndexSignature": false
   },
   "include": ["src", "test"],
   "exports": {
