@@ -1,3 +1,4 @@
+import type { AgentMessage } from '../llm/types.ts';
 import type { Agent } from './agent.ts';
 import { SessionManager, type SessionMessageEntry } from './session-manager.ts';
 import type { AgentEvent } from './types.ts';
@@ -71,10 +72,14 @@ export class AgentSession {
 
   // 从会话文件恢复：协议历史还给 Agent（后续生成基于完整上下文），聊天记录重建到 store
   private restoreSession(): void {
-    const messages = this.sessionManager
-      .entries()
-      .filter((entry): entry is SessionMessageEntry => entry.type === 'message')
-      .map(entry => entry.message);
+    const messages = normalizeRestoredMessages(
+      this.sessionManager
+        .entries()
+        .filter(
+          (entry): entry is SessionMessageEntry => entry.type === 'message',
+        )
+        .map(entry => entry.message),
+    );
 
     this.agent.state.messages.push(...messages);
 
@@ -272,19 +277,22 @@ export class AgentSession {
           this.emit({ type: 'message_sealed', message: updated });
         }
 
-        if (event.result) {
-          this.sessionManager.appendMessage(event.result);
-        }
-
         break;
       }
 
       case 'turn_end': {
         // 一轮结束：冻结当前段，下一轮的文本另起一条消息
         this.sealOpenBlock();
+        // 持久化顺序必须是 assistant 在前、它的工具结果在后；反过来
+        // resume 之后发给 API 会被拒绝（tool 消息前面没有带 tool_calls 的 assistant）
         if (event.message) {
           this.sessionManager.appendMessage(event.message);
         }
+
+        for (const toolResult of event.toolResults) {
+          this.sessionManager.appendMessage(toolResult);
+        }
+
         break;
       }
 
@@ -403,4 +411,94 @@ export class AgentSession {
       listener(event);
     }
   }
+}
+
+// 恢复会话文件时把消息序列整理成 API 接受的形态：
+// 1. 旧版本把 tool_result 写在 assistant 之前（持久化顺序 bug），挪回正确顺序
+// 2. 中断等原因留下的孤儿工具调用（assistant 有 tool_calls 但没有对应
+//    tool_result）原样发给 API 也会 400，剥掉；剥完没有内容的空 assistant 一并丢弃
+function normalizeRestoredMessages(messages: AgentMessage[]): AgentMessage[] {
+  const reordered: AgentMessage[] = [];
+  for (const message of messages) {
+    if (message.role === 'assistant') {
+      const toolCallIds = new Set(
+        message.content.flatMap(block =>
+          block.type === 'tool_call' ? [block.id] : [],
+        ),
+      );
+      if (toolCallIds.size > 0) {
+        // 末尾紧邻的、属于这条 assistant 的 tool_result 挪到它后面
+        let runStart = reordered.length;
+        while (runStart > 0) {
+          const previous = reordered[runStart - 1];
+          if (
+            previous?.role === 'tool_result' &&
+            toolCallIds.has(previous.toolCallId)
+          ) {
+            runStart--;
+          } else {
+            break;
+          }
+        }
+
+        if (runStart < reordered.length) {
+          const moved = reordered.splice(runStart);
+          reordered.push(message, ...moved);
+          continue;
+        }
+      }
+    }
+
+    reordered.push(message);
+  }
+
+  // 每个 tool_call 必须有对应的 tool_result，反之亦然
+  const claimedIds = new Set<string>();
+  for (const message of reordered) {
+    if (message.role === 'assistant') {
+      for (const block of message.content) {
+        if (block.type === 'tool_call') {
+          claimedIds.add(block.id);
+        }
+      }
+    }
+  }
+
+  const answeredIds = new Set<string>();
+  for (const message of reordered) {
+    if (message.role === 'tool_result' && claimedIds.has(message.toolCallId)) {
+      answeredIds.add(message.toolCallId);
+    }
+  }
+
+  const result: AgentMessage[] = [];
+  for (const message of reordered) {
+    if (message.role === 'tool_result') {
+      if (claimedIds.has(message.toolCallId)) {
+        result.push(message);
+      }
+
+      continue;
+    }
+
+    if (message.role === 'assistant') {
+      const content = message.content.filter(
+        block => block.type !== 'tool_call' || answeredIds.has(block.id),
+      );
+      if (content.length === 0) {
+        continue;
+      }
+
+      result.push(
+        content.length === message.content.length
+          ? message
+          : { ...message, content },
+      );
+      continue;
+    }
+
+    result.push(message);
+  }
+
+  return result;
 }

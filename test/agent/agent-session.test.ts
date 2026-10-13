@@ -1,5 +1,14 @@
+import {
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
 import { Agent } from '../../src/agent/agent.ts';
 import {
   AgentSession,
@@ -7,6 +16,7 @@ import {
   type TextChatMessage,
   type ToolChatMessage,
 } from '../../src/agent/agent-session.ts';
+import type { SessionEntry } from '../../src/agent/session-manager.ts';
 import {
   type AgentMessage,
   type AssistantMessage,
@@ -330,6 +340,189 @@ test('send is ignored while generating and for empty input', async () => {
 
   session.cancel();
   await until(() => !session.isStreaming);
+});
+
+test('session file writes assistant message before its tool results', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'bubble-session-'));
+  vi.stubEnv('BUBBLE_HOME', home);
+  try {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: 'echo',
+      description: 'echo',
+      inputSchema: {},
+      async execute(input: Record<string, unknown>) {
+        // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
+        return { success: true, output: `ok: ${String(input['value'])}` };
+      },
+    });
+    const model = new ScriptedModel([
+      { toolCalls: [{ id: 'call-1', name: 'echo', input: { value: 'hi' } }] },
+      { text: '完成了。' },
+    ]);
+    const session = new AgentSession(new Agent({ model, tools: registry }));
+    session.prompt('跑一下');
+    await until(() => !session.isStreaming);
+    // 等写入落盘再读文件
+    await session.dispose();
+
+    const [projectDir] = readdirSync(join(home, 'sessions'));
+    const [fileName] = readdirSync(join(home, 'sessions', projectDir!));
+    const entries = readFileSync(
+      join(home, 'sessions', projectDir!, fileName!),
+      'utf8',
+    )
+      .split('\n')
+      .filter(Boolean)
+      .map(line => JSON.parse(line) as SessionEntry);
+    const roles = entries.flatMap(entry =>
+      entry.type === 'message' ? [entry.message.role] : [],
+    );
+
+    // API 要求 tool 消息紧跟在带 tool_calls 的 assistant 之后
+    const assistantIndex = roles.indexOf('assistant');
+    const toolResultIndex = roles.indexOf('tool_result');
+    expect(assistantIndex).toBeGreaterThan(-1);
+    expect(toolResultIndex).toBeGreaterThan(assistantIndex);
+  } finally {
+    vi.unstubAllEnvs();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('resuming a session with tool_result before its assistant message repairs the order', () => {
+  const home = mkdtempSync(join(tmpdir(), 'bubble-session-'));
+  try {
+    // 复刻旧持久化 bug 写出的文件：tool_result 排在发起它的 assistant 之前
+    const filePath = join(home, 'session-broken.jsonl');
+    const entries: SessionEntry[] = [
+      {
+        type: 'metadata',
+        id: 'broken',
+        cwd: process.cwd(),
+        version: 1,
+        timestamp: 1,
+      },
+      {
+        type: 'message',
+        id: 'e1',
+        timestamp: 2,
+        message: { role: 'user', content: '读一下 a.ts', timestamp: 2 },
+      },
+      {
+        type: 'message',
+        id: 'e3',
+        timestamp: 3,
+        message: {
+          role: 'tool_result',
+          toolName: 'read',
+          toolCallId: 'call-1',
+          output: '文件内容',
+          timestamp: 3,
+        },
+      },
+      {
+        type: 'message',
+        id: 'e4',
+        timestamp: 4,
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              id: 'call-1',
+              name: 'read',
+              input: { filePath: 'a.ts' },
+            },
+          ],
+          stopReason: 'tool_use',
+          timestamp: 4,
+        },
+      },
+    ];
+    writeFileSync(
+      filePath,
+      `${entries.map(entry => JSON.stringify(entry)).join('\n')}\n`,
+    );
+
+    const agent = new Agent({
+      model: new MockModel(0),
+      tools: new ToolRegistry(),
+    });
+    const session = new AgentSession(agent, filePath);
+
+    // 恢复后发给模型的消息：assistant 必须在它的 tool_result 之前
+    const roles = agent.state.messages.map(message => message.role);
+    expect(roles).toEqual(['system', 'user', 'assistant', 'tool_result']);
+
+    // 工具结果也要能贴回 UI 上的工具消息
+    const tool = session.messages.find(message => message.role === 'tool');
+    expect(tool?.output).toBe('文件内容');
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('resume drops tool calls that have no matching tool result', () => {
+  const home = mkdtempSync(join(tmpdir(), 'bubble-session-'));
+  try {
+    // 中断时可能只留下带 tool_calls 的 assistant，没有对应 tool_result；
+    // 原样发给 API 会 400，恢复时剥掉未完成的调用
+    const filePath = join(home, 'session-orphan.jsonl');
+    const entries: SessionEntry[] = [
+      {
+        type: 'metadata',
+        id: 'orphan',
+        cwd: process.cwd(),
+        version: 1,
+        timestamp: 1,
+      },
+      {
+        type: 'message',
+        id: 'e1',
+        timestamp: 2,
+        message: { role: 'user', content: '干活', timestamp: 2 },
+      },
+      {
+        type: 'message',
+        id: 'e2',
+        timestamp: 3,
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'text', text: '让我看看。' },
+            {
+              type: 'tool_call',
+              id: 'call-1',
+              name: 'read',
+              input: { filePath: 'a.ts' },
+            },
+          ],
+          stopReason: 'tool_use',
+          timestamp: 3,
+        },
+      },
+    ];
+    writeFileSync(
+      filePath,
+      `${entries.map(entry => JSON.stringify(entry)).join('\n')}\n`,
+    );
+
+    const agent = new Agent({
+      model: new MockModel(0),
+      tools: new ToolRegistry(),
+    });
+    new AgentSession(agent, filePath);
+
+    const assistant = agent.state.messages.find(
+      message => message.role === 'assistant',
+    );
+    expect(assistant?.content.every(block => block.type !== 'tool_call')).toBe(
+      true,
+    );
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
 });
 
 type ScriptTurn = {
