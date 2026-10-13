@@ -7,14 +7,11 @@ import type {
 } from '../llm/types.ts';
 import type { AgentContext, AgentEvent } from './types.ts';
 
-export type AgentLoopOptions = {
-  maxSteps?: number;
-};
+// biome-ignore lint/complexity/noBannedTypes: 预留
+export type AgentLoopOptions = {};
 
 // 事件发射器
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
-
-const defaultMaxSteps = 30;
 
 export async function runAgentLoop(
   // 本次运行的增量输入，暂时只支持文本输入，后期再考虑图片/文件引用。
@@ -42,11 +39,7 @@ export async function runAgentLoop(
   };
 
   if (!options) {
-    options = {
-      maxSteps: defaultMaxSteps,
-    };
-  } else if (!options.maxSteps) {
-    options.maxSteps = defaultMaxSteps;
+    options = {};
   }
 
   await runLoop(runContext, options, emit, signal, model, newMessages);
@@ -57,7 +50,7 @@ export async function runAgentLoop(
 // 返回本次运行新增的消息
 async function runLoop(
   context: AgentContext,
-  options: AgentLoopOptions,
+  _options: AgentLoopOptions,
   emit: AgentEventSink,
   signal: AbortSignal | undefined,
   model: Model,
@@ -69,8 +62,7 @@ async function runLoop(
     signal,
   };
   await emit({ type: 'run_start' });
-  let step = 0;
-  while (step < options.maxSteps!) {
+  while (true) {
     // 上一步刚被取消就别再发起请求了
     if (signal?.aborted) {
       break;
@@ -225,19 +217,12 @@ async function runLoop(
       message,
       toolResults,
     });
-
-    step++;
   }
 
   if (signal?.aborted) {
     await emit({ type: 'run_end', reason: 'aborted', messages: newMessages });
   } else {
-    await emit({
-      type: 'run_end',
-      reason: 'max_steps',
-      error: new Error(`达到最大步数 ${options.maxSteps}，循环终止`),
-      messages: newMessages,
-    });
+    throw new Error('unexpected stop in agent-loop!');
   }
 
   return newMessages;
