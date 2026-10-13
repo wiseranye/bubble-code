@@ -6,6 +6,7 @@ import {
   getKeybindings,
   Key,
   matchesKey,
+  type OverlayHandle,
   type SelectList,
   Spacer,
   stripTerminalSequences,
@@ -20,10 +21,15 @@ import type {
   ChatMessage,
 } from '../agent/agent-session.ts';
 import {
+  loadSessionFileEntries,
+  type SessionFileEntry,
+} from '../agent/session-manager.ts';
+import {
   AssistantMessageView,
   createMessageView,
   type MessageView,
 } from './message-view.ts';
+import { SessionPicker } from './session-picker.ts';
 import {
   matchSlashCommand,
   SlashCommandAutocomplete,
@@ -38,7 +44,7 @@ const hintText =
 
 export function createChatApp(
   tui: TUI,
-  createSession: () => AgentSession,
+  createSession: (sessionFile?: string) => AgentSession,
 ): void {
   const messageArea = new Container();
   const indicatorSlot = new Container();
@@ -78,6 +84,11 @@ export function createChatApp(
   };
 
   const handleKey = (data: string): TuiInputListenerResult => {
+    // 弹窗打开时按键全部交给弹窗处理（Esc / Ctrl+C 由 SelectList 走取消）
+    if (tui.hasOverlay()) {
+      return undefined;
+    }
+
     if (matchesKey(data, Key.ctrl('c'))) {
       tui.stop();
       // Ctrl+C 直接退出：这是前台 TUI 进程，退出就是它的职责
@@ -143,6 +154,53 @@ export function createChatApp(
     tui.requestRender();
   };
 
+  // /resume：恢复选中的会话。可能选中的就是当前会话的文件，
+  // 必须先等旧会话的写入落盘，再重新读文件
+  const resumeSession = async (entry: SessionFileEntry): Promise<void> => {
+    await session.dispose();
+    try {
+      session = createSession(entry.filePath);
+    } catch (error: unknown) {
+      // 会话文件损坏等情况：退回新会话，不把界面卡死
+      session = createSession();
+      bindSession();
+      const detail = error instanceof Error ? error.message : String(error);
+      session.notify(`恢复会话失败：${detail}`);
+      return;
+    }
+
+    bindSession();
+    session.notify(`已恢复会话：${entry.title}`);
+  };
+
+  // /resume：弹出当前目录的历史会话列表
+  const openSessionPicker = (): void => {
+    const entries = loadSessionFileEntries(process.cwd());
+    if (entries.length === 0) {
+      session.notify('当前目录下没有历史会话');
+      return;
+    }
+
+    let overlay: OverlayHandle | undefined;
+    const close = (): void => {
+      overlay?.hide();
+      overlay = undefined;
+    };
+    const picker = new SessionPicker(
+      entries,
+      entry => {
+        close();
+        void resumeSession(entry);
+      },
+      close,
+    );
+    overlay = tui.showOverlay(picker, {
+      width: '70%',
+      maxHeight: 14,
+      anchor: 'center',
+    });
+  };
+
   // 斜杠命令的执行入口，UI 只负责分发到这里
   const runSlashCommand = (
     invocation: SlashCommandInvocation,
@@ -155,9 +213,20 @@ export function createChatApp(
           break;
         }
 
-        session.dispose();
+        // 新会话用新文件，不需要等旧会话落盘
+        void session.dispose();
         session = createSession();
         bindSession();
+        break;
+      }
+
+      case 'resume': {
+        if (session.isStreaming) {
+          session.notify('请等待当前会话结束');
+          break;
+        }
+
+        openSessionPicker();
         break;
       }
 

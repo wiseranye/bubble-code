@@ -1,21 +1,31 @@
 import {
+  closeSync,
   createWriteStream,
+  existsSync,
   mkdirSync,
+  openSync,
+  readdirSync,
   readFileSync,
+  readSync,
+  statSync,
   type WriteStream,
 } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import path, { dirname, join, resolve } from 'node:path';
+import Type, { type Static } from 'typebox';
+import Value from 'typebox/value';
 import { v7 as uuidv7 } from 'uuid';
 import type { AgentMessage } from '../llm/types.ts';
 
-export interface SessionMeta {
-  type: 'metadata';
-  id: string;
-  cwd: string;
-  version: number;
-  timestamp: number;
-}
+const SessionMetaSchema = Type.Object({
+  type: Type.Literal('metadata'),
+  id: Type.String(),
+  cwd: Type.String(),
+  version: Type.Number(),
+  timestamp: Type.Number(),
+});
+
+export type SessionMeta = Static<typeof SessionMetaSchema>;
 
 export interface BaseSessionEntry {
   type: string;
@@ -30,11 +40,20 @@ export interface SessionMessageEntry extends BaseSessionEntry {
 
 export type SessionEntry = SessionMeta | SessionMessageEntry;
 
+export interface SessionFileEntry {
+  id: string;
+  cwd: string;
+  title: string;
+  version: number;
+  timestamp: number;
+  filePath: string;
+}
+
 const CURRENT_SESSION_VERSION = 1;
 
 function resolveHome(): string {
-  const bubbleHome = process.env.BUBBLE_HOME?.trim();
-  return bubbleHome ? resolve(bubbleHome) : join(homedir(), '.bubble');
+  const appHome = process.env.BUBBLE_HOME?.trim();
+  return appHome ? resolve(appHome) : join(homedir(), '.bubble');
 }
 
 function formatCwd(cwd: string): string {
@@ -43,6 +62,141 @@ function formatCwd(cwd: string): string {
     .replace(/:/g, '')
     .replace(/^\/+/, '')
     .replace(/\//g, '-')}`;
+}
+
+function loadSessionEntries(filePath: string): SessionEntry[] {
+  const content = readFileSync(filePath, 'utf-8');
+  return content
+    .split('\n')
+    .filter(line => line.trim())
+    .map(line => JSON.parse(line) as SessionEntry);
+}
+
+function readMetadataEntry(filePath: string): SessionMeta | undefined {
+  const fd = openSync(filePath, 'r');
+  const buffer = Buffer.alloc(1024);
+  let result = '';
+  try {
+    // 只需要第一行（metadata），读到第一个换行就停
+    while (true) {
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) {
+        break;
+      }
+
+      const chunk = buffer.toString('utf8', 0, bytesRead);
+      const newlineIndex = chunk.indexOf('\n');
+      if (newlineIndex !== -1) {
+        result += chunk.slice(0, newlineIndex);
+        break;
+      }
+
+      result += chunk;
+    }
+  } finally {
+    closeSync(fd);
+  }
+
+  try {
+    const entry = JSON.parse(result.replace(/\r$/, ''));
+    if (!Value.Check(SessionMetaSchema, entry)) {
+      return undefined;
+    }
+    return entry as SessionMeta;
+  } catch (error: unknown) {
+    console.error(`parse session file entry failed: ${error}`);
+    return undefined;
+  }
+}
+
+// 标题的最大长度，超出部分截断
+const maxTitleLength = 60;
+
+// 会话标题取第一条用户消息。用户消息一般是文件第 2 行，分块读、找到即停，不读全文件
+function readSessionTitle(filePath: string): string | undefined {
+  const fd = openSync(filePath, 'r');
+  try {
+    let rest = '';
+    const buffer = Buffer.alloc(64 * 1024);
+    while (true) {
+      const bytesRead = readSync(fd, buffer, 0, buffer.length, null);
+      if (bytesRead === 0) {
+        return undefined;
+      }
+
+      rest += buffer.toString('utf8', 0, bytesRead);
+      let newlineIndex = rest.indexOf('\n');
+      while (newlineIndex !== -1) {
+        const line = rest.slice(0, newlineIndex);
+        rest = rest.slice(newlineIndex + 1);
+        const title = parseTitleLine(line);
+        if (title !== undefined) {
+          return title;
+        }
+
+        newlineIndex = rest.indexOf('\n');
+      }
+    }
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function parseTitleLine(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (trimmed === '') {
+    return undefined;
+  }
+
+  let entry: SessionEntry;
+  try {
+    entry = JSON.parse(trimmed) as SessionEntry;
+  } catch {
+    return undefined;
+  }
+
+  if (entry.type === 'message' && entry.message.role === 'user') {
+    // 压成单行，过长截断
+    const oneLine = entry.message.content.replace(/\s+/g, ' ').trim();
+    return oneLine.length > maxTitleLength
+      ? `${oneLine.slice(0, maxTitleLength)}…`
+      : oneLine;
+  }
+
+  return undefined;
+}
+
+// 加载给定工作目录的所有历史会话，按时间倒序（最近的在前）
+export function loadSessionFileEntries(cwd: string): SessionFileEntry[] {
+  const appHome = resolveHome();
+  const sessionDir = `${appHome}/sessions/${formatCwd(cwd)}`;
+  if (!existsSync(sessionDir) || !statSync(sessionDir).isDirectory()) {
+    // 如果目标目录不是一个文件夹，我们把报错留到写入的地方
+    return [];
+  }
+  const entries = readdirSync(sessionDir, { withFileTypes: true });
+
+  return entries
+    .filter(entry => entry.isFile() && entry.name.endsWith('.jsonl'))
+    .map(entry => {
+      const filePath = path.join(sessionDir, entry.name);
+      const metadata = readMetadataEntry(filePath);
+      if (!metadata) {
+        return undefined;
+      } else {
+        return {
+          id: metadata.id,
+          cwd: metadata.cwd,
+          version: metadata.version,
+          // 没有用户消息（比如刚创建就退出）时退回会话 id
+          title: readSessionTitle(filePath) ?? metadata.id,
+          timestamp: metadata.timestamp,
+          filePath: filePath,
+        } as SessionFileEntry;
+      }
+    })
+    .filter(entry => entry !== undefined)
+    .sort((a, b) => b.timestamp - a.timestamp);
 }
 
 export class SessionManager {
@@ -59,7 +213,7 @@ export class SessionManager {
   constructor(cwd: string, sessionFile?: string) {
     this._cwd = cwd;
     if (sessionFile) {
-      this._entries = this._loadEntries(sessionFile);
+      this._entries = loadSessionEntries(sessionFile);
       this._sessionDir = dirname(sessionFile);
       this._sessionFile = sessionFile;
       // resolve session id
@@ -94,16 +248,8 @@ export class SessionManager {
     return this._cwd;
   }
 
-  sessionFile(): string {
-    return this._sessionFile;
-  }
-
-  private _loadEntries(file: string): SessionEntry[] {
-    const content = readFileSync(file, 'utf-8');
-    return content
-      .split('\n')
-      .filter(line => line.trim())
-      .map(line => JSON.parse(line) as SessionEntry);
+  entries(): SessionEntry[] {
+    return this._entries;
   }
 
   private _isMetadataEntry(entry: SessionEntry): entry is SessionMeta {
@@ -166,7 +312,8 @@ export class SessionManager {
     this._writeStream = undefined;
     if (stream) {
       stream.end();
-      void new Promise<void>((resolve, reject) => {
+      // 等到 finish：close 返回时数据必须已落盘，/resume 紧接着重读同一个文件依赖这一点
+      await new Promise<void>((resolve, reject) => {
         stream.once('finish', resolve);
         stream.once('error', reject);
       });

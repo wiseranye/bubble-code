@@ -62,14 +62,18 @@ async function main(): Promise<void> {
   setTerminalTitle('bubble');
   const settings = await loadSettings();
   const { provider, model } = findModel(settings);
-  // Build agent
-  const agent = new Agent({
-    model: new OpenAiModel(provider.baseUrl, provider.apiKey, model.id),
-    tools: newToolRegistry(),
-  });
+  // 每个会话一个 Agent：协议历史随会话走，/new 和 /resume 都不会串上下文
+  const createAgent = (): Agent =>
+    new Agent({
+      model: new OpenAiModel(provider.baseUrl, provider.apiKey, model.id),
+      tools: newToolRegistry(),
+    });
   const terminal = new ProcessTerminal();
   const tui = new TuiMainScreen(terminal);
-  createChatApp(tui, () => new AgentSession(agent));
+  createChatApp(
+    tui,
+    sessionFile => new AgentSession(createAgent(), sessionFile),
+  );
   tui.start();
 }
 

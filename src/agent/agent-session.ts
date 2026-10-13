@@ -1,5 +1,5 @@
 import type { Agent } from './agent.ts';
-import { SessionManager } from './session-manager.ts';
+import { SessionManager, type SessionMessageEntry } from './session-manager.ts';
 import type { AgentEvent } from './types.ts';
 
 // UI 消息模型：和协议消息（AgentMessage）分离，带 id 和渲染状态
@@ -51,18 +51,92 @@ export class AgentSession {
 
   private readonly sessionManager: SessionManager;
 
-  constructor(agent: Agent) {
+  constructor(agent: Agent, sessionFile?: string) {
     this.agent = agent;
     this.unsubscribeAgent = agent.subscribe(event => {
       this.handleAgentEvent(event);
     });
-    // 欢迎语在 UI 订阅之前就存在，启动时直接补建视图
-    this.store.push({
-      id: this.idCounter++,
-      role: 'system',
-      content: 'Bubble Code — 输入问题，Enter 发送。',
-    });
-    this.sessionManager = new SessionManager(process.cwd());
+    this.sessionManager = new SessionManager(process.cwd(), sessionFile);
+    if (sessionFile === undefined) {
+      // 欢迎语在 UI 订阅之前就存在，启动时直接补建视图
+      this.store.push({
+        id: this.idCounter++,
+        role: 'system',
+        content: 'Bubble Code — 输入问题，Enter 发送。',
+      });
+    } else {
+      this.restoreSession();
+    }
+  }
+
+  // 从会话文件恢复：协议历史还给 Agent（后续生成基于完整上下文），聊天记录重建到 store
+  private restoreSession(): void {
+    const messages = this.sessionManager
+      .entries()
+      .filter((entry): entry is SessionMessageEntry => entry.type === 'message')
+      .map(entry => entry.message);
+
+    this.agent.state.messages.push(...messages);
+
+    // tool_result 贴回对应的工具消息，键为 toolCallId
+    const toolMessages = new Map<string, ToolChatMessage>();
+    for (const message of messages) {
+      switch (message.role) {
+        case 'user': {
+          this.store.push({
+            id: this.idCounter++,
+            role: 'user',
+            content: message.content,
+          });
+          break;
+        }
+
+        case 'assistant': {
+          for (const block of message.content) {
+            if (block.type === 'text') {
+              this.store.push({
+                id: this.idCounter++,
+                role: 'assistant',
+                content: block.text,
+              });
+            } else if (block.type === 'thinking') {
+              this.store.push({
+                id: this.idCounter++,
+                role: 'thinking',
+                content: block.thinking,
+              });
+            } else {
+              // 恢复的会话不在执行中，工具消息直接是终态；成功与否没有持久化，按成功展示
+              const toolMessage: ToolChatMessage = {
+                id: this.idCounter++,
+                role: 'tool',
+                toolCallId: block.id,
+                name: block.name,
+                input: JSON.stringify(block.input),
+                output: '',
+                status: 'done',
+                success: true,
+              };
+              toolMessages.set(block.id, toolMessage);
+              this.store.push(toolMessage);
+            }
+          }
+          break;
+        }
+
+        case 'tool_result': {
+          const toolMessage = toolMessages.get(message.toolCallId);
+          if (toolMessage !== undefined) {
+            toolMessage.output = message.output;
+          }
+          break;
+        }
+
+        default: {
+          break;
+        }
+      }
+    }
   }
 
   get messages(): readonly ChatMessage[] {
@@ -114,10 +188,11 @@ export class AgentSession {
     this.appendSystemMessage(content);
   }
 
-  // /new 替换会话时调用：退订 agent 事件，旧会话不再接收任何后续事件
-  dispose(): void {
+  // /new 替换会话时调用：退订 agent 事件，旧会话不再接收任何后续事件。
+  // 返回写入落盘的 Promise：/resume 重读同一个会话文件前必须 await
+  dispose(): Promise<void> {
     this.unsubscribeAgent();
-    this.sessionManager.close();
+    return this.sessionManager.close();
   }
 
   private async run(

@@ -20,7 +20,7 @@ export const style = {
   running: (text: string) => chalk.yellow(text),
 };
 
-const selectListTheme: SelectListTheme = {
+export const selectListTheme: SelectListTheme = {
   selectedPrefix: text => chalk.cyan(text),
   selectedText: text => chalk.bold(text),
   description: text => chalk.dim(text),
