@@ -10,6 +10,7 @@ export const style = {
   userMark: (text: string) => chalk.bold.cyan(text),
   assistantMark: (text: string) => chalk.bold.blue(text),
   bubble: (text: string) => chalk.bold.cyan(text),
+  logo: (text: string) => chalk.bold.cyan(text),
   prompt: (text: string) => chalk.bold.cyan(text),
   system: (text: string) => chalk.gray(text),
   toolMark: (text: string, failed: boolean) =>

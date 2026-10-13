@@ -24,6 +24,7 @@ import {
   loadSessionFileEntries,
   type SessionFileEntry,
 } from '../agent/session-manager.ts';
+import { LogoBanner } from './logo.ts';
 import {
   AssistantMessageView,
   createMessageView,
@@ -260,6 +261,9 @@ export function createChatApp(
   editor.disableSubmit = session.isStreaming;
 
   const root = new Container();
+  // 启动横幅只在启动时挂一次：它挂在 root 上而不是 messageArea 里，
+  // /new、/resume 清空消息区时不会被带走
+  root.addChild(new LogoBanner());
   root.addChild(messageArea);
   root.addChild(indicatorSlot);
   root.addChild(editor);
