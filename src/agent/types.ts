@@ -14,7 +14,7 @@ export type AgentEvent =
   | { type: 'run_start' }
   | {
       type: 'run_end';
-      reason: 'complete' | 'aborted' | 'max_steps' | 'error';
+      reason: 'complete' | 'aborted' | 'error';
       messages: AgentMessage[];
       error?: Error;
     }

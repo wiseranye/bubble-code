@@ -297,9 +297,9 @@ export class AgentSession {
       }
 
       case 'run_end': {
-        if (event.reason === 'error' || event.reason === 'max_steps') {
+        if (event.reason === 'error') {
           const detail = event.error?.message ?? '未知错误';
-          const label = event.reason === 'max_steps' ? '达到最大步数' : '出错';
+          const label = '出错';
           this.appendText('assistant', `\n\n[${label}] ${detail}`);
         }
 
