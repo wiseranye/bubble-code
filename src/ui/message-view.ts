@@ -243,7 +243,7 @@ class ToolMessageView implements MessageView {
     ];
 
     const inner = Math.max(1, width - markerColumns);
-    const input = summariseInput(message.input);
+    const input = summariseToolInput(message.name, message.input);
     if (input !== '') {
       for (const line of wrapTextWithAnsi(`→ ${input}`, inner)) {
         lines.push(`  ${style.dim(line)}`);
@@ -284,6 +284,57 @@ function collectCodeTokens(tokens: Token[]): Tokens.Code[] {
   }
 
   return found;
+}
+
+// 工具专属的参数摘要：read 展示「路径 + 行范围」，比整行 JSON 易读；
+// 解析失败回落到通用摘要
+function summariseToolInput(name: string, input: string): string {
+  if (name === 'read') {
+    const summary = summariseReadInput(input);
+    if (summary !== undefined) {
+      return summary;
+    }
+  }
+
+  return summariseInput(input);
+}
+
+// → src/app.ts
+// → src/app.ts（第 10 行起，共 20 行）
+// → src/app.ts（从第 10 行起）
+// → src/app.ts（前 20 行）
+function summariseReadInput(input: string): string | undefined {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    return undefined;
+  }
+
+  if (!isRecord(parsed)) {
+    return undefined;
+  }
+
+  const { filePath, offset, limit } = parsed;
+  if (typeof filePath !== 'string') {
+    return undefined;
+  }
+
+  const hasOffset = typeof offset === 'number';
+  const hasLimit = typeof limit === 'number';
+  if (hasOffset && hasLimit) {
+    return `${filePath}（第 ${offset} 行起，共 ${limit} 行）`;
+  }
+
+  if (hasOffset) {
+    return `${filePath}（从第 ${offset} 行起）`;
+  }
+
+  if (hasLimit) {
+    return `${filePath}（前 ${limit} 行）`;
+  }
+
+  return filePath;
 }
 
 // 参数压成一行展示：只有一个字段（比如 bash 的 command）时只显示值，
