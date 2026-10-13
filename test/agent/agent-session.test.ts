@@ -8,7 +8,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { expect, test, vi } from 'vitest';
+import { afterEach, beforeEach, expect, test, vi } from 'vitest';
 import { Agent } from '../../src/agent/agent.ts';
 import {
   AgentSession,
@@ -29,6 +29,20 @@ import {
   type ToolCall,
 } from '../../src/llm/types.ts';
 import { ToolRegistry } from '../../src/tools/types.ts';
+
+// AgentSession 会把会话写到 BUBBLE_HOME（缺省 ~/.bubble）。
+// 不隔离的话，每个构造 AgentSession 的用例都会往真实会话目录写垃圾文件
+let bubbleHome: string;
+
+beforeEach(() => {
+  bubbleHome = mkdtempSync(join(tmpdir(), 'bubble-home-'));
+  vi.stubEnv('BUBBLE_HOME', bubbleHome);
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  rmSync(bubbleHome, { recursive: true, force: true });
+});
 
 // A mock implementation used until a real model backend is wired up. It
 // streams a canned reply token-by-token so the UI behaves like a real
