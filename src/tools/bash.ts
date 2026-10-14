@@ -5,7 +5,9 @@ import type { ToolResult } from './types.ts';
 
 // Bash 输入
 const bashInputSchema = z.object({
-  command: z.string().meta({ description: 'The bash command to execute, such as find, ls, or ps.' })
+  command: z.string().meta({
+    description: 'The bash command to execute, such as find, ls, or ps.',
+  }),
 });
 
 export type BashInput = z.infer<typeof bashInputSchema>;
