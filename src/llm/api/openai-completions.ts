@@ -1,9 +1,5 @@
 import OpenAI from 'openai';
-import type {
-  ChatCompletionChunk,
-  FunctionParameters,
-} from 'openai/resources.js';
-import type { AnyTool } from '../../tools/types.ts';
+import type { ChatCompletionChunk } from 'openai/resources.js';
 import {
   type AssistantMessage,
   AssistantMessageEventStream,
@@ -86,7 +82,7 @@ export class OpenAiModel implements Model {
         function: {
           name: tool.name,
           description: tool.description,
-          parameters: this.makeJsonSchemaToolParameters(tool),
+          parameters: tool.inputSchema,
         },
       }),
     );
@@ -491,9 +487,5 @@ export class OpenAiModel implements Model {
       content: content.length > 0 ? content : null,
       ...(toolCalls.length > 0 ? { tool_calls: toolCalls } : {}),
     };
-  }
-
-  private makeJsonSchemaToolParameters(tool: AnyTool): FunctionParameters {
-    return tool.inputSchema as FunctionParameters;
   }
 }

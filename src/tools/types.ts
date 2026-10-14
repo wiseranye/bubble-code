@@ -1,14 +1,13 @@
-import type { Static, TSchema } from 'typebox';
-
 // 工具定义
-export type Tool<ToolInput extends TSchema> = {
+export type Tool<TInput = unknown> = {
   name: string;
   description: string;
-  inputSchema: ToolInput;
-  execute(input: Static<ToolInput>): Promise<ToolResult>;
+  // JSON Schema 格式的参数定义，由 defineTool 从 zod schema 转换而来
+  inputSchema: Record<string, unknown>;
+  execute(input: TInput): Promise<ToolResult>;
 };
 
-export type AnyTool = Tool<TSchema>;
+export type AnyTool = Tool;
 
 // 工具结果
 export type ToolResult = {
@@ -22,7 +21,7 @@ export type ToolResult = {
 export class ToolRegistry {
   private readonly tools = new Map<string, AnyTool>();
 
-  register<T extends TSchema>(tool: Tool<T>): void {
+  register<T>(tool: Tool<T>): void {
     if (this.tools.has(tool.name)) {
       throw new Error(`Tool already defined: ${tool.name}`);
     }

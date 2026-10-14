@@ -1,7 +1,7 @@
 import { createReadStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { createInterface } from 'node:readline/promises';
-import Type, { type Static } from 'typebox';
+import * as z from 'zod';
 import {
   DEFAULT_MAX_BYTES,
   DEFAULT_MAX_LINES,
@@ -9,26 +9,29 @@ import {
   truncateHead,
   utf8ByteLength,
 } from '../utils/truncate.ts';
-import type { Tool, ToolResult } from './types.ts';
+import { defineTool } from './schema.ts';
+import type { ToolResult } from './types.ts';
 
-export const readInputSchema = Type.Object({
-  filePath: Type.String({
-    description: '文件路径（相对当前工作目录的路径/绝对路径）',
-  }),
-  limit: Type.Optional(
-    Type.Number({
+export const readInputSchema = z.object({
+  filePath: z
+    .string()
+    .meta({ description: '文件路径（相对当前工作目录的路径/绝对路径）' }),
+  limit: z
+    .number()
+    .meta({
       description:
         '最大读取行数,不传则读所有;如果传了 offset 没传 limit 则读取从 offset 开始的所有行',
-    }),
-  ),
-  offset: Type.Optional(
-    Type.Number({
+    })
+    .optional(),
+  offset: z
+    .number()
+    .meta({
       description: '读取的起始行数（从 1 开始），不传则默认从第一行开始读',
-    }),
-  ),
+    })
+    .optional(),
 });
 
-export type ReadInput = Static<typeof readInputSchema>;
+export type ReadInput = z.infer<typeof readInputSchema>;
 
 type ReadLinesResult = {
   lines: string[];
@@ -137,7 +140,7 @@ function formatOutput(
   return output;
 }
 
-export const readTool: Tool<typeof readInputSchema> = {
+export const readTool = defineTool({
   name: 'read',
   description: `Read the contents of a text file. output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
   inputSchema: readInputSchema,
@@ -159,7 +162,7 @@ export const readTool: Tool<typeof readInputSchema> = {
       return failure(error instanceof Error ? error.message : String(error));
     }
   },
-};
+});
 
 function isErrnoException(error: unknown): error is NodeJS.ErrnoException {
   return error instanceof Error && 'code' in error;

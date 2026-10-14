@@ -1,18 +1,19 @@
 import { execa } from 'execa';
-import Type, { type Static } from 'typebox';
-import type { Tool, ToolResult } from './types.ts';
+import * as z from 'zod';
+import { defineTool } from './schema.ts';
+import type { ToolResult } from './types.ts';
 
 // Bash 输入
-const bashInputSchema = Type.Object({
-  command: Type.String(),
+const bashInputSchema = z.object({
+  command: z.string().meta({ description: 'The bash command to execute, such as find, ls, or ps.' })
 });
 
-export type BashInput = Static<typeof bashInputSchema>;
+export type BashInput = z.infer<typeof bashInputSchema>;
 
 // Bash 命令执行超时时间
 const bashExecuteTimeout = 30_000;
 
-export const bashTool: Tool<typeof bashInputSchema> = {
+export const bashTool = defineTool({
   name: 'bash',
   description: '当需要执行bash命令的时候使用',
   inputSchema: bashInputSchema,
@@ -51,4 +52,4 @@ export const bashTool: Tool<typeof bashInputSchema> = {
       output,
     };
   },
-};
+});

@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { afterEach, beforeEach, expect, test, vi } from 'vitest';
+import * as z from 'zod';
 import { Agent } from '../../src/agent/agent.ts';
 import {
   AgentSession,
@@ -28,6 +29,7 @@ import {
   type Thinking,
   type ToolCall,
 } from '../../src/llm/types.ts';
+import { defineTool } from '../../src/tools/schema.ts';
 import { ToolRegistry } from '../../src/tools/types.ts';
 
 // AgentSession 会把会话写到 BUBBLE_HOME（缺省 ~/.bubble）。
@@ -185,15 +187,17 @@ test('streams assistant text and seals both messages', async () => {
 
 test('running a tool creates a tool message that is updated and sealed', async () => {
   const registry = new ToolRegistry();
-  registry.register({
-    name: 'echo',
-    description: 'echo',
-    inputSchema: {},
-    async execute(input: Record<string, unknown>) {
-      // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
-      return { success: true, output: `ok: ${String(input['value'])}` };
-    },
-  });
+  registry.register(
+    defineTool({
+      name: 'echo',
+      description: 'echo',
+      inputSchema: z.object({ value: z.string() }),
+      async execute(input: Record<string, unknown>) {
+        // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
+        return { success: true, output: `ok: ${String(input['value'])}` };
+      },
+    }),
+  );
 
   const model = new ScriptedModel([
     {
@@ -361,15 +365,17 @@ test('session file writes assistant message before its tool results', async () =
   vi.stubEnv('BUBBLE_HOME', home);
   try {
     const registry = new ToolRegistry();
-    registry.register({
-      name: 'echo',
-      description: 'echo',
-      inputSchema: {},
-      async execute(input: Record<string, unknown>) {
-        // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
-        return { success: true, output: `ok: ${String(input['value'])}` };
-      },
-    });
+    registry.register(
+      defineTool({
+        name: 'echo',
+        description: 'echo',
+        inputSchema: z.object({ value: z.string() }),
+        async execute(input: Record<string, unknown>) {
+          // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
+          return { success: true, output: `ok: ${String(input['value'])}` };
+        },
+      }),
+    );
     const model = new ScriptedModel([
       { toolCalls: [{ id: 'call-1', name: 'echo', input: { value: 'hi' } }] },
       { text: '完成了。' },

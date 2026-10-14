@@ -12,20 +12,19 @@ import {
 } from 'node:fs';
 import { homedir } from 'node:os';
 import path, { dirname, join, resolve } from 'node:path';
-import Type, { type Static } from 'typebox';
-import Value from 'typebox/value';
 import { v7 as uuidv7 } from 'uuid';
+import * as z from 'zod';
 import type { AgentMessage } from '../llm/types.ts';
 
-const SessionMetaSchema = Type.Object({
-  type: Type.Literal('metadata'),
-  id: Type.String(),
-  cwd: Type.String(),
-  version: Type.Number(),
-  timestamp: Type.Number(),
+const SessionMetaSchema = z.object({
+  type: z.literal('metadata'),
+  id: z.string(),
+  cwd: z.string(),
+  version: z.number(),
+  timestamp: z.number(),
 });
 
-export type SessionMeta = Static<typeof SessionMetaSchema>;
+export type SessionMeta = z.infer<typeof SessionMetaSchema>;
 
 export interface BaseSessionEntry {
   type: string;
@@ -98,11 +97,12 @@ function readMetadataEntry(filePath: string): SessionMeta | undefined {
   }
 
   try {
-    const entry = JSON.parse(result.replace(/\r$/, ''));
-    if (!Value.Check(SessionMetaSchema, entry)) {
+    const entry: unknown = JSON.parse(result.replace(/\r$/, ''));
+    const parsed = SessionMetaSchema.safeParse(entry);
+    if (!parsed.success) {
       return undefined;
     }
-    return entry as SessionMeta;
+    return parsed.data;
   } catch (error: unknown) {
     console.error(`parse session file entry failed: ${error}`);
     return undefined;
