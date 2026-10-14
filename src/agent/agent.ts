@@ -3,7 +3,7 @@
 import type { Model } from '../llm/types.ts';
 import type { ToolRegistry } from '../tools/types.ts';
 import { runAgentLoop } from './agent-loop.ts';
-import { systemPrompt } from './constants.ts';
+import { buildSystemPrompt } from './system-prompt.ts';
 import type { AgentContext, AgentEvent, AgentState } from './types.ts';
 
 export interface AgentOptions {
@@ -27,7 +27,7 @@ export class Agent {
     };
     this._state.messages.push({
       role: 'system',
-      content: systemPrompt,
+      content: buildSystemPrompt(tools),
     });
   }
 
