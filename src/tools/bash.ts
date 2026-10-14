@@ -8,27 +8,44 @@ const bashInputSchema = z.object({
   command: z.string().meta({
     description: 'The bash command to execute, such as find, ls, or ps.',
   }),
+  timeout: z.optional(
+    z.number().meta({
+      description: 'Timeout in seconds (optional, default 60s)',
+    }),
+  ),
 });
 
 export type BashInput = z.infer<typeof bashInputSchema>;
 
 // Bash 命令执行超时时间
-const bashExecuteTimeout = 30_000;
+const defaultTimeout = 60_000;
 
 export const bashTool = defineTool({
   name: 'bash',
   description: '当需要执行bash命令的时候使用',
   inputSchema: bashInputSchema,
   async execute(input: BashInput): Promise<ToolResult> {
+    let timeout: number;
+    if (input.timeout === undefined) {
+      timeout = defaultTimeout;
+    } else if (!Number.isFinite(input.timeout) || input.timeout <= 0) {
+      return {
+        success: false,
+        error: 'timeout must be a positive number',
+        output: 'timeout must be a positive number',
+      };
+    } else {
+      timeout = input.timeout * 1000;
+    }
     const result = await execa('bash', ['-lc', input.command], {
       reject: false,
-      timeout: bashExecuteTimeout,
+      timeout: defaultTimeout,
     });
     const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
     if (result.timedOut) {
       return {
         success: false,
-        error: `execute timed out after ${bashExecuteTimeout / 1000} seconds`,
+        error: `execute timed out after ${timeout / 1000} seconds`,
         output,
       };
     }
