@@ -1,11 +1,11 @@
 import * as z from 'zod';
-import type { Tool, ToolResult } from './types.ts';
+import type { Tool, ToolContext, ToolResult } from './types.ts';
 
 export interface DefineToolOptions<Input extends z.ZodType> {
   name: string;
   description: string;
   inputSchema: Input;
-  execute(input: z.infer<Input>): Promise<ToolResult>;
+  execute(input: z.infer<Input>, context: ToolContext): Promise<ToolResult>;
 }
 
 export function defineTool<Input extends z.ZodType>(

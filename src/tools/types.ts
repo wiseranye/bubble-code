@@ -1,10 +1,16 @@
+// 工具上下文
+export interface ToolContext {
+  cwd: string;
+  signal?: AbortSignal;
+}
+
 // 工具定义
 export type Tool<TInput = unknown> = {
   name: string;
   description: string;
   // JSON Schema 格式的参数定义，由 defineTool 从 zod schema 转换而来
   inputSchema: Record<string, unknown>;
-  execute(input: TInput): Promise<ToolResult>;
+  execute(input: TInput, context: ToolContext): Promise<ToolResult>;
 };
 
 export type AnyTool = Tool;

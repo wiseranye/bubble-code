@@ -1,7 +1,7 @@
 import { execa } from 'execa';
 import * as z from 'zod';
 import { defineTool } from './schema.ts';
-import type { ToolResult } from './types.ts';
+import type { ToolContext, ToolResult } from './types.ts';
 
 // Bash 输入
 const bashInputSchema = z.object({
@@ -24,7 +24,7 @@ export const bashTool = defineTool({
   name: 'bash',
   description: '当需要执行bash命令的时候使用',
   inputSchema: bashInputSchema,
-  async execute(input: BashInput): Promise<ToolResult> {
+  async execute(input: BashInput, context: ToolContext): Promise<ToolResult> {
     let timeout: number;
     if (input.timeout === undefined) {
       timeout = defaultTimeout;
@@ -39,7 +39,9 @@ export const bashTool = defineTool({
     }
     const result = await execa('bash', ['-lc', input.command], {
       reject: false,
-      timeout: defaultTimeout,
+      timeout,
+      cancelSignal: context.signal,
+      cwd: context.cwd,
     });
     const output = [result.stdout, result.stderr].filter(Boolean).join('\n');
     if (result.timedOut) {

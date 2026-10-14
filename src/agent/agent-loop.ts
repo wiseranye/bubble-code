@@ -172,11 +172,17 @@ async function runLoop(
 
     // 循环工具调用
     for (const { id, name, input } of waitingToolCalls) {
+      // 中断后不再执行剩余的工具调用
+      if (signal?.aborted) {
+        break;
+      }
       let output: string;
       let success = false;
       try {
         // eslint-disable-next-line no-await-in-loop, unicorn/no-array-callback-reference -- 工具按顺序执行；ToolRegistry.find 不是 Array.find
-        const result = await context.tools.find(name).execute(input);
+        const result = await context.tools
+          .find(name)
+          .execute(input, { cwd: process.cwd(), signal });
         success = result.success;
         // 失败信息也要给模型看到，否则它不知道命令挂了
         output = result.success
