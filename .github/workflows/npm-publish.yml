@@ -22,7 +22,7 @@ jobs:
           version: 12.10.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
           cache: pnpm
@@ -38,6 +38,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      id-token: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -48,16 +52,17 @@ jobs:
           version: 12.10.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 24
-          registry-url: https://registry.npmjs.org/
-          cache: pnpm
+          registry-url: https://registry.npmjs.org
+          package-manager-cache: false
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Publish package
+      - name: Determine npm dist-tag
+        id: dist-tag
         shell: bash
         run: |
           VERSION=$(node -p "require('./package.json').version")
@@ -70,7 +75,9 @@ jobs:
             TAG="latest"
           fi
 
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "Publishing version $VERSION with tag $TAG"
-          npm publish --tag "$TAG"
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.npm_token }}
+
+      - name: Publish package
+        run: npm publish --tag "${{ steps.dist-tag.outputs.tag }}"
