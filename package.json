@@ -1,6 +1,6 @@
 {
   "name": "@wiseranye/bubble-code",
-  "version": "0.2.0-rc.1",
+  "version": "0.2.0-beta.1",
   "description": "Bubble Code - 一个编码智能体",
   "license": "MIT",
   "bin": {
