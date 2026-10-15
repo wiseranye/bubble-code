@@ -6,6 +6,10 @@
   "bin": {
     "bubble": "dist/cli.js"
   },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wiseranye/bubble-code.git"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.19.0"
