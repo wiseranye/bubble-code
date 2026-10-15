@@ -58,6 +58,19 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Publish package
-        run: npm publish
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+
+          if [[ "$VERSION" == *-beta* ]]; then
+            TAG="beta"
+          elif [[ "$VERSION" == *-rc* ]]; then
+            TAG="rc"
+          else
+            TAG="latest"
+          fi
+
+          echo "Publishing version $VERSION with tag $TAG"
+          npm publish --tag "$TAG"
         env:
           NODE_AUTH_TOKEN: ${{ secrets.npm_token }}
