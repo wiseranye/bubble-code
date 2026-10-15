@@ -65,7 +65,10 @@ export type ToolResultMessage = {
   role: 'tool_result';
   toolName: string;
   toolCallId: string;
+  // 工具原始输出；失败时的 error 单独存放，不并进 output
   output: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
   timestamp: number;
 };
 

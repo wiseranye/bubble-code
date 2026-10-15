@@ -2,8 +2,10 @@ import { expect, test } from 'vitest';
 import {
   applyReplacements,
   applyReplacementsPreservingUnchangedLines,
+  computeLineDiff,
   detectLineEnding,
   findText,
+  locateMatch,
   normalizeForFuzzyMatch,
   normalizeToLF,
   restoreLineEndings,
@@ -118,4 +120,125 @@ test('applyReplacementsPreservingUnchangedLines rejects a range past the base co
       { matchIndex: 0, matchLength: 5, newText: 'x' },
     ]),
   ).toThrow('Replacement range is outside the base content.');
+});
+
+test('locateMatch reports the matched text and its 1-based start line', () => {
+  expect(locateMatch('a\nbc\nd\n', 2, 2)).toEqual({
+    text: 'bc',
+    startLine: 2,
+  });
+  expect(locateMatch('abc', 0, 3)).toEqual({ text: 'abc', startLine: 1 });
+});
+
+test('computeLineDiff keeps identical texts as pure context', () => {
+  expect(computeLineDiff('a\nb\n', 'a\nb\n')).toEqual([
+    { type: 'context', text: 'a', oldLine: 1, newLine: 1 },
+    { type: 'context', text: 'b', oldLine: 2, newLine: 2 },
+  ]);
+});
+
+test('computeLineDiff marks an inserted line as add', () => {
+  expect(computeLineDiff('a\nc\n', 'a\nb\nc\n')).toEqual([
+    { type: 'context', text: 'a', oldLine: 1, newLine: 1 },
+    { type: 'add', text: 'b', newLine: 2 },
+    { type: 'context', text: 'c', oldLine: 2, newLine: 3 },
+  ]);
+});
+
+test('computeLineDiff marks a deleted line as del', () => {
+  expect(computeLineDiff('a\nb\nc\n', 'a\nc\n')).toEqual([
+    { type: 'context', text: 'a', oldLine: 1, newLine: 1 },
+    { type: 'del', text: 'b', oldLine: 2 },
+    { type: 'context', text: 'c', oldLine: 3, newLine: 2 },
+  ]);
+});
+
+test('computeLineDiff renders a replaced block as del followed by add', () => {
+  expect(computeLineDiff('a\nb\nc\n', 'a\nB\nc\n')).toEqual([
+    { type: 'context', text: 'a', oldLine: 1, newLine: 1 },
+    { type: 'del', text: 'b', oldLine: 2 },
+    { type: 'add', text: 'B', newLine: 2 },
+    { type: 'context', text: 'c', oldLine: 3, newLine: 3 },
+  ]);
+});
+
+test('computeLineDiff trims context and elides the gap between two changes', () => {
+  const oldText = [
+    'a',
+    'b',
+    'B2',
+    'c',
+    'd',
+    'e',
+    'f',
+    'g',
+    'h',
+    'i',
+    'j',
+    'X',
+    'l',
+  ];
+  const newText = [
+    'a',
+    'b',
+    'B3',
+    'c',
+    'd',
+    'e',
+    'f',
+    'g',
+    'h',
+    'i',
+    'j',
+    'Y',
+    'l',
+  ];
+
+  expect(computeLineDiff(oldText.join('\n'), newText.join('\n'))).toEqual([
+    { type: 'context', text: 'a', oldLine: 1, newLine: 1 },
+    { type: 'context', text: 'b', oldLine: 2, newLine: 2 },
+    { type: 'del', text: 'B2', oldLine: 3 },
+    { type: 'add', text: 'B3', newLine: 3 },
+    { type: 'context', text: 'c', oldLine: 4, newLine: 4 },
+    { type: 'context', text: 'd', oldLine: 5, newLine: 5 },
+    { type: 'context', text: 'e', oldLine: 6, newLine: 6 },
+    { type: 'elision' },
+    { type: 'context', text: 'h', oldLine: 9, newLine: 9 },
+    { type: 'context', text: 'i', oldLine: 10, newLine: 10 },
+    { type: 'context', text: 'j', oldLine: 11, newLine: 11 },
+    { type: 'del', text: 'X', oldLine: 12 },
+    { type: 'add', text: 'Y', newLine: 12 },
+    { type: 'context', text: 'l', oldLine: 13, newLine: 13 },
+  ]);
+});
+
+test('computeLineDiff keeps every line when the context window is infinite', () => {
+  const oldText = ['a', 'b', 'B2', 'c', 'd', 'e'];
+  const newText = ['a', 'b', 'B3', 'c', 'd', 'e'];
+  const entries = computeLineDiff(
+    oldText.join('\n'),
+    newText.join('\n'),
+    Number.POSITIVE_INFINITY,
+  );
+
+  // 改动前后各 3 行都在，没有被裁掉也没有省略标记
+  expect(entries).toEqual([
+    { type: 'context', text: 'a', oldLine: 1, newLine: 1 },
+    { type: 'context', text: 'b', oldLine: 2, newLine: 2 },
+    { type: 'del', text: 'B2', oldLine: 3 },
+    { type: 'add', text: 'B3', newLine: 3 },
+    { type: 'context', text: 'c', oldLine: 4, newLine: 4 },
+    { type: 'context', text: 'd', oldLine: 5, newLine: 5 },
+    { type: 'context', text: 'e', oldLine: 6, newLine: 6 },
+  ]);
+});
+
+test('computeLineDiff handles empty texts', () => {
+  expect(computeLineDiff('', 'a\n')).toEqual([
+    { type: 'add', text: 'a', newLine: 1 },
+  ]);
+  expect(computeLineDiff('a\n', '')).toEqual([
+    { type: 'del', text: 'a', oldLine: 1 },
+  ]);
+  expect(computeLineDiff('', '')).toEqual([]);
 });

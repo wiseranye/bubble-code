@@ -7,12 +7,14 @@ import {
   Key,
   matchesKey,
   type OverlayHandle,
+  ScrollView,
   type SelectList,
   Spacer,
   stripTerminalSequences,
   Text,
-  type TUI,
   type TuiInputListenerResult,
+  type ViewportTUI,
+  VStack,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 import type {
@@ -24,6 +26,7 @@ import {
   loadSessionFileEntries,
   type SessionFileEntry,
 } from '../agent/session-manager.ts';
+import type { ToolRegistry } from '../tools/types.ts';
 import { LogoBanner } from './logo.ts';
 import {
   AssistantMessageView,
@@ -44,10 +47,16 @@ const hintText =
   'Enter 发送 · Shift+Enter 换行 · / 命令 · ↑↓ 历史 · Ctrl+U 清空 · Esc 取消 · Ctrl+C 退出';
 
 export function createChatApp(
-  tui: TUI,
+  tui: ViewportTUI,
   createSession: (sessionFile?: string) => AgentSession,
+  tools: ToolRegistry,
 ): void {
+  // 转录文档：启动横幅 + 消息区。全屏模式下它挂在 ScrollView 里滚动，
+  // /new、/resume 只清消息区，横幅不会被带走
+  const transcript = new Container();
   const messageArea = new Container();
+  transcript.addChild(new LogoBanner());
+  transcript.addChild(messageArea);
   const indicatorSlot = new Container();
   const views = new Map<number, MessageView>();
   let indicator: BubblingIndicator | undefined;
@@ -55,7 +64,7 @@ export function createChatApp(
   let session = createSession();
 
   const addMessage = (message: ChatMessage): void => {
-    const view = createMessageView(message, () => tui.requestRender());
+    const view = createMessageView(message, tools, () => tui.requestRender());
     views.set(message.id, view);
     messageArea.addChild(view);
     // 每条消息后留一个空行
@@ -91,7 +100,9 @@ export function createChatApp(
     }
 
     if (matchesKey(data, Key.ctrl('c'))) {
-      tui.stop();
+      // 全屏模式退出时不重画"文档"：转录区在非布局上下文里只剩 1 行，
+      // 重画出来的是半截画面，直接切回普通屏更干净（pi 的做法）
+      tui.stop({ preserveScreen: true });
       // Ctrl+C 直接退出：这是前台 TUI 进程，退出就是它的职责
       // eslint-disable-next-line unicorn/no-process-exit
       process.exit(0);
@@ -232,7 +243,7 @@ export function createChatApp(
       }
 
       case 'quit': {
-        tui.stop();
+        tui.stop({ preserveScreen: true });
         process.exit(0);
         // process.exit 不会返回，break 只是为了过 lint
         break;
@@ -260,15 +271,24 @@ export function createChatApp(
 
   editor.disableSubmit = session.isStreaming;
 
-  const root = new Container();
-  // 启动横幅只在启动时挂一次：它挂在 root 上而不是 messageArea 里，
-  // /new、/resume 清空消息区时不会被带走
-  root.addChild(new LogoBanner());
-  root.addChild(messageArea);
-  root.addChild(indicatorSlot);
-  root.addChild(editor);
-  root.addChild(new Text(style.dim(hintText), 1, 0));
-  tui.addChild(root);
+  // 转录区自己滚动：新内容贴底，向上滚过之后不再被新输出拽回去
+  const transcriptView = new ScrollView(transcript, {
+    follow: 'end',
+    primary: true,
+  });
+  // 底部固定区，不随转录滚动：生成状态、输入框、提示行
+  const dock = new VStack([
+    { component: indicatorSlot, shrink: 1, minSize: 0 },
+    { component: editor, shrink: 1, minSize: 3 },
+    { component: new Text(style.dim(hintText), 1, 0), shrink: 1, minSize: 0 },
+  ]);
+  // 全屏布局：转录区吃满剩余高度，底部固定区按内容高度贴着视口下沿
+  tui.setLayoutRoot(
+    new VStack([
+      { component: transcriptView, basis: 0, grow: 1, shrink: 1, minSize: 1 },
+      { component: dock, basis: 'auto', grow: 0, shrink: 1, minSize: 1 },
+    ]),
+  );
   tui.setFocus(editor);
   tui.addInputListener(handleKey);
 

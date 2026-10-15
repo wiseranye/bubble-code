@@ -176,7 +176,9 @@ async function runLoop(
       if (signal?.aborted) {
         break;
       }
-      let output: string;
+      let output = '';
+      let error: string | undefined;
+      let metadata: Record<string, unknown> | undefined;
       let success = false;
       try {
         // eslint-disable-next-line no-await-in-loop, unicorn/no-array-callback-reference -- 工具按顺序执行；ToolRegistry.find 不是 Array.find
@@ -184,14 +186,14 @@ async function runLoop(
           .find(name)
           .execute(input, { cwd: process.cwd(), signal });
         success = result.success;
-        // 失败信息也要给模型看到，否则它不知道命令挂了
-        output = result.success
-          ? result.output
-          : [result.error, result.output].filter(Boolean).join('\n');
-      } catch (error: unknown) {
+        // error 和 output 分开保留；拼成模型可见文本的事在 llm 适配层做
+        output = result.output;
+        error = result.error;
+        metadata = result.metadata;
+      } catch (failure: unknown) {
         // 工具不存在、或工具自己抛了，也要作为结果喂回去，模型才有机会纠正；
         output = `工具执行失败：${
-          error instanceof Error ? error.message : String(error)
+          failure instanceof Error ? failure.message : String(failure)
         }`;
       }
 
@@ -200,6 +202,8 @@ async function runLoop(
         toolName: name,
         toolCallId: id,
         output,
+        error,
+        metadata,
         timestamp: Date.now(),
       };
       // 工具调用结果,暂时没有流式

@@ -25,7 +25,7 @@ _Avoid_: History、Log、Messages
 _Avoid_: ChatController、ViewModel、Store、Conversation
 
 **Sealed（已冻结）**:
-一条不会再被修改的 Chat message。已冻结的消息可以安全地留在终端 scrollback 里；只有未冻结的消息允许更新。
+一条不再随流式输出变化的 Chat message。冻结之后仍允许用户主动触发的更新（展开/收起工具消息的正文）。
 _Avoid_: Finalized、Committed、Closed
 
 **Tool message（工具消息）**:

@@ -4,6 +4,10 @@ import {
   Marked,
   type Token,
   type Tokens,
+  type TuiMouseEvent,
+  type TuiMouseEventResult,
+  truncateToWidth,
+  visibleWidth,
   wrapTextWithAnsi,
 } from '@earendil-works/pi-tui';
 import type {
@@ -11,15 +15,26 @@ import type {
   TextChatMessage,
   ToolChatMessage,
 } from '../agent/agent-session.ts';
+import type {
+  ToolRegistry,
+  ToolRenderer,
+  ToolRenderState,
+} from '../tools/types.ts';
 import { withCodeBlockStyle } from './code-block.ts';
 import { highlightCode } from './highlight.ts';
 import { createMarkdownTheme, style } from './theme.ts';
+import {
+  defaultToolRenderer,
+  hasMoreToolBody,
+  renderToolBody,
+  summariseToolInput,
+} from './tool-render-default.ts';
 
 // 消息左侧标记列（标记 + 空格）占的列数
 const markerColumns = 2;
 
-// 工具输出超过这个行数就折叠，避免一条命令刷满整个消息区
-const maxToolOutputLines = 8;
+// 展开后正文末尾的收起提示（视图自己补的行，不属于任何渲染器）
+const collapseHint = '… 点击收起';
 
 // 思考过程默认折叠到这个行数，只给读者一个梗概
 const maxThinkingLines = 3;
@@ -30,7 +45,8 @@ export type MessageView = Component & {
 
 export function createMessageView(
   message: ChatMessage,
-  onHighlightReady: () => void,
+  tools: ToolRegistry,
+  onRenderRequest: () => void,
 ): MessageView {
   switch (message.role) {
     case 'system': {
@@ -42,7 +58,7 @@ export function createMessageView(
     }
 
     case 'assistant': {
-      return new AssistantMessageView(message.content, onHighlightReady);
+      return new AssistantMessageView(message.content, onRenderRequest);
     }
 
     case 'thinking': {
@@ -50,7 +66,12 @@ export function createMessageView(
     }
 
     case 'tool': {
-      return new ToolMessageView(message);
+      // 没有 render、或工具名未知（恢复的旧会话里工具可能已改名）时走兜底渲染器
+      return new ToolMessageView(
+        message,
+        tools.get(message.name)?.render ?? defaultToolRenderer,
+        onRenderRequest,
+      );
     }
 
     default: {
@@ -144,8 +165,7 @@ export class AssistantMessageView implements MessageView {
     this.markdown.invalidate();
   }
 
-  // 冻结前调用：把正文里所有代码块的语法高亮算完，
-  // 之后这条消息不再修改（pi-tui 主屏对已滚出视口的行改动会整卷重打）
+  // 冻结前调用：把正文里所有代码块的语法高亮算完，之后这条消息不再修改
   async seal(): Promise<void> {
     if (this.sealed) {
       return;
@@ -212,11 +232,28 @@ class ThinkingMessageView implements MessageView {
   }
 }
 
-class ToolMessageView implements MessageView {
+export class ToolMessageView implements MessageView {
   private message: ToolChatMessage;
+  private readonly renderer: ToolRenderer;
+  private readonly onRenderRequest: () => void;
+  // 展开状态跨 update 保留：同一条消息从 running 变 done，不该把用户展开的正文又折回去
+  private expanded: boolean;
+  // 折叠时正文最后一行是「… 还有 N 行，点击展开」提示，点它也能展开；没有提示时为 undefined
+  private collapsedTipRow: number | undefined;
+  // 展开时正文末尾是视图补的「… 点击收起」行，点它收起；没有这行时为 undefined
+  private expandedTipRow: number | undefined;
 
-  constructor(message: ToolChatMessage) {
+  constructor(
+    message: ToolChatMessage,
+    renderer: ToolRenderer,
+    onRenderRequest: () => void,
+  ) {
     this.message = message;
+    this.renderer = renderer;
+    this.onRenderRequest = onRenderRequest;
+    this.expanded = false;
+    this.collapsedTipRow = undefined;
+    this.expandedTipRow = undefined;
   }
 
   update(message: ChatMessage): void {
@@ -229,42 +266,128 @@ class ToolMessageView implements MessageView {
     // 没有缓存，不需要清
   }
 
-  render(width: number): string[] {
-    const { message } = this;
-    const running = message.status === 'running';
-    const failed = !running && !message.success;
-
-    // 执行中/成功 → 黄色齿轮；失败 → 红色叉
-    const lines = [
-      `${style.toolMark(failed ? '✗' : '⚙', failed)} ${style.toolName(
-        message.name,
-        failed,
-      )}${running ? style.running('（执行中…）') : ''}`,
-    ];
-
-    const inner = Math.max(1, width - markerColumns);
-    const input = summariseToolInput(message.name, message.input);
-    if (input !== '') {
-      for (const line of wrapTextWithAnsi(`→ ${input}`, inner)) {
-        lines.push(`  ${style.dim(line)}`);
-      }
+  // 头部行、折叠提示行、收起行都能点。
+  // 全屏 TUI 先派发 press、再在 release 时补发 click：press 必须返回 handled，
+  // 否则不会被记为点击目标，click 永远不会发到组件上。真正的切换留给 click，
+  // 这样按住后拖到别处松开不会误触
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.button !== 'left' || !this.isToggleRow(event.y)) {
+      return undefined;
     }
 
-    const { lines: outputLines, hidden } = toolOutputLines(
-      message.output,
-      maxToolOutputLines,
+    if (event.type === 'press') {
+      return { handled: true };
+    }
+
+    if (event.type !== 'click') {
+      return undefined;
+    }
+
+    this.toggleExpanded();
+    return { handled: true, render: true };
+  }
+
+  private isToggleRow(y: number): boolean {
+    return (
+      y === 0 ||
+      (this.collapsedTipRow !== undefined && y === this.collapsedTipRow) ||
+      (this.expandedTipRow !== undefined && y === this.expandedTipRow)
     );
-    for (const line of outputLines) {
-      for (const wrapped of wrapTextWithAnsi(line === '' ? ' ' : line, inner)) {
-        lines.push(`  ${style.dim(wrapped)}`);
-      }
+  }
+
+  toggleExpanded(): void {
+    this.expanded = !this.expanded;
+    this.invalidate();
+    this.onRenderRequest();
+  }
+
+  render(width: number): string[] {
+    const inner = Math.max(1, width - markerColumns);
+    const state = this.renderState();
+    // 展开/收起入口交给渲染器判断：正文行数会被折叠预览里的提示行带偏
+    const expandable = (this.renderer.hasMoreBody ?? hasMoreToolBody)(state);
+
+    const body = this.bodyLines(state, inner, this.expanded);
+    // 收起行由视图补在正文末尾，渲染器不知道它的存在；缩进和正文行一致
+    const rows =
+      this.expanded && expandable
+        ? [...body, `${' '.repeat(markerColumns)}${style.dim(collapseHint)}`]
+        : body;
+    this.collapsedTipRow =
+      !this.expanded && expandable ? body.length : undefined;
+    this.expandedTipRow = this.expanded && expandable ? rows.length : undefined;
+
+    return [this.headerLine(state, inner, expandable), ...rows];
+  }
+
+  // 头部行：标记 + 工具名 + 参数摘要 + 折叠指示符。展开的入口就是这一行
+  private headerLine(
+    state: ToolRenderState,
+    inner: number,
+    expandable: boolean,
+  ): string {
+    const failed = state.status === 'done' && !state.success;
+    const mark = style.toolMark(failed ? '✗' : '⚙', failed);
+    const name = style.toolName(this.message.name, failed);
+    const running =
+      state.status === 'running' ? style.running('（执行中…）') : '';
+    const summary =
+      this.renderer.summarise?.(state.input) ?? summariseToolInput(state.input);
+    const summaryText = summary === '' ? '' : ` ${style.dim(`→ ${summary}`)}`;
+    // 指示符挂在行尾，先给摘要留出它的宽度再截断，否则超长摘要会把它切掉
+    const indicator = expandable
+      ? ` ${style.dim(this.expanded ? '▾' : '▸')}`
+      : '';
+
+    const head = `${mark} ${name}${running}${summaryText}`;
+    return (
+      truncateToWidth(head, Math.max(1, inner - visibleWidth(indicator))) +
+      indicator
+    );
+  }
+
+  // 正文行：渲染器自己着色、自己收窄到 inner，这里只补左侧标记列的缩进
+  private bodyLines(
+    state: ToolRenderState,
+    inner: number,
+    expanded: boolean,
+  ): string[] {
+    if (state.status !== 'done') {
+      return [];
     }
 
-    if (hidden > 0) {
-      lines.push(`  ${style.dim(`… 还有 ${hidden} 行输出`)}`);
+    const renderBody = this.renderer.renderBody ?? renderToolBody;
+    return renderBody(state, { width: inner, expanded }).map(line =>
+      line === ''
+        ? ''
+        : `${' '.repeat(markerColumns)}${truncateToWidth(line, inner)}`,
+    );
+  }
+
+  private renderState(): ToolRenderState {
+    const { message } = this;
+    const input = parseToolInput(message.input);
+    if (message.status === 'running') {
+      return { status: 'running', input };
     }
 
-    return lines;
+    return {
+      status: 'done',
+      input,
+      output: message.output,
+      error: message.error,
+      success: message.success,
+      metadata: message.metadata,
+    };
+  }
+}
+
+// 工具参数以 JSON 字符串保存；解析失败（历史会话里的异常数据）时原样交给渲染器
+function parseToolInput(input: string): unknown {
+  try {
+    return JSON.parse(input);
+  } catch {
+    return input;
   }
 }
 
@@ -284,109 +407,4 @@ function collectCodeTokens(tokens: Token[]): Tokens.Code[] {
   }
 
   return found;
-}
-
-// 工具专属的参数摘要：read 展示「路径 + 行范围」，比整行 JSON 易读；
-// 解析失败回落到通用摘要
-function summariseToolInput(name: string, input: string): string {
-  if (name === 'read') {
-    const summary = summariseReadInput(input);
-    if (summary !== undefined) {
-      return summary;
-    }
-  }
-
-  return summariseInput(input);
-}
-
-// → src/app.ts
-// → src/app.ts（第 10 行起，共 20 行）
-// → src/app.ts（从第 10 行起）
-// → src/app.ts（前 20 行）
-function summariseReadInput(input: string): string | undefined {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(input);
-  } catch {
-    return undefined;
-  }
-
-  if (!isRecord(parsed)) {
-    return undefined;
-  }
-
-  const { filePath, offset, limit } = parsed;
-  if (typeof filePath !== 'string') {
-    return undefined;
-  }
-
-  const hasOffset = typeof offset === 'number';
-  const hasLimit = typeof limit === 'number';
-  if (hasOffset && hasLimit) {
-    return `${filePath}（第 ${offset} 行起，共 ${limit} 行）`;
-  }
-
-  if (hasOffset) {
-    return `${filePath}（从第 ${offset} 行起）`;
-  }
-
-  if (hasLimit) {
-    return `${filePath}（前 ${limit} 行）`;
-  }
-
-  return filePath;
-}
-
-// 参数压成一行展示：只有一个字段（比如 bash 的 command）时只显示值，
-// 其余情况原样显示 JSON
-function summariseInput(input: string): string {
-  const trimmed = input.trim();
-  if (trimmed === '') {
-    return '';
-  }
-
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    if (isRecord(parsed)) {
-      const entries = Object.entries(parsed);
-      const single = entries.length === 1 ? entries[0] : undefined;
-      if (single) {
-        const [, value] = single;
-        if (typeof value === 'string') {
-          return toSingleLine(value);
-        }
-      }
-    }
-  } catch {
-    // 参数不是合法 JSON，原样显示
-  }
-
-  return toSingleLine(trimmed);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-// 多行参数（比如写文件的 content）只显示第一行，避免撑爆消息区
-function toSingleLine(text: string): string {
-  const [first = '', ...rest] = text.split('\n');
-  return rest.length > 0 ? `${first} …` : first;
-}
-
-type OutputLines = {
-  lines: string[];
-  hidden: number;
-};
-
-function toolOutputLines(output: string, limit: number): OutputLines {
-  if (output === '' || limit <= 0) {
-    return { lines: [], hidden: 0 };
-  }
-
-  const all = output.replace(/\n+$/, '').split('\n');
-  return {
-    lines: all.slice(0, limit),
-    hidden: Math.max(0, all.length - limit),
-  };
 }

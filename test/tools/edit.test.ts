@@ -1,4 +1,10 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, expect, test } from 'vitest';
@@ -189,4 +195,148 @@ test('an aborted signal is rejected before any write', async () => {
   expect(result.success).toBe(false);
   expect(result.error).toBe('operation aborted');
   expect(readFile('a.txt')).toBe('a\n');
+});
+
+test('a successful edit reports the diff metadata for rendering', async () => {
+  writeFile('a.txt', 'one\ntwo\nthree\n');
+  const result = await editTool.execute(
+    { filePath: 'a.txt', oldText: 'two', newText: 'TWO' },
+    { cwd: dir },
+  );
+
+  expect(result.metadata).toEqual({
+    diff: {
+      filePath: 'a.txt',
+      oldText: 'two',
+      newText: 'TWO',
+      startLine: 2,
+      fuzzy: false,
+    },
+  });
+});
+
+test('the diff metadata carries the text as it appears in the file', async () => {
+  writeFile('a.txt', 'a\r\nb\r\nc\r\n');
+  const result = await editTool.execute(
+    { filePath: 'a.txt', oldText: 'b\r\n', newText: 'B\r\n' },
+    { cwd: dir },
+  );
+
+  expect(result.success).toBe(true);
+  expect(result.metadata?.diff).toEqual({
+    filePath: 'a.txt',
+    oldText: 'b\n',
+    newText: 'B\n',
+    startLine: 2,
+    fuzzy: false,
+  });
+});
+
+test('replaceAll uses the first occurrence for the diff metadata', async () => {
+  writeFile('a.txt', 'x\nkeep\nx\n');
+  const result = await editTool.execute(
+    { filePath: 'a.txt', oldText: 'x', newText: 'y', replaceAll: true },
+    { cwd: dir },
+  );
+
+  expect(result.success).toBe(true);
+  expect(readFile('a.txt')).toBe('y\nkeep\ny\n');
+  expect(result.metadata?.diff).toEqual({
+    filePath: 'a.txt',
+    oldText: 'x',
+    newText: 'y',
+    startLine: 1,
+    fuzzy: false,
+  });
+});
+
+test('a fuzzy edit marks the diff metadata as fuzzy', async () => {
+  writeFile('a.txt', 'const s = \u201Chi\u201D;\n');
+  const result = await editTool.execute(
+    {
+      filePath: 'a.txt',
+      oldText: 'const s = "hi";',
+      newText: 'const s = "yo";',
+    },
+    { cwd: dir },
+  );
+
+  expect(result.success).toBe(true);
+  expect(result.metadata?.diff).toEqual({
+    filePath: 'a.txt',
+    oldText: 'const s = "hi";',
+    newText: 'const s = "yo";',
+    startLine: 1,
+    fuzzy: true,
+  });
+});
+
+test('a failed edit carries no diff metadata', async () => {
+  writeFile('a.txt', 'a\n');
+  const result = await editTool.execute(
+    { filePath: 'a.txt', oldText: 'nope', newText: 'b' },
+    { cwd: dir },
+  );
+
+  expect(result.success).toBe(false);
+  expect(result.metadata).toBeUndefined();
+});
+
+// 权限位对 root 不生效，权限测试需要跳过
+const isRoot = process.getuid?.() === 0;
+
+test('a non-UTF-8 file is refused without touching a single byte', async () => {
+  const bytes = Buffer.from([0xff, 0xfe, 0x00, 0x62, 0x61, 0x64]);
+  writeFileSync(join(dir, 'binary.txt'), bytes);
+
+  const result = await editTool.execute(
+    { filePath: 'binary.txt', oldText: 'bad', newText: 'good' },
+    { cwd: dir },
+  );
+
+  expect(result.success).toBe(false);
+  expect(result.error).toBe(
+    'File is not valid UTF-8: binary.txt. It may be binary or use another encoding; edit refused to avoid corrupting it.',
+  );
+  expect(readFileSync(join(dir, 'binary.txt'))).toEqual(bytes);
+});
+
+test('a file that legitimately contains U+FFFD stays editable', async () => {
+  writeFile('a.txt', 'a\uFFFDb\n');
+
+  const result = await editTool.execute(
+    { filePath: 'a.txt', oldText: '\uFFFDb', newText: '\uFFFDc' },
+    { cwd: dir },
+  );
+
+  expect(result.success).toBe(true);
+  expect(readFile('a.txt')).toBe('a\uFFFDc\n');
+});
+
+test.skipIf(isRoot)('a read failure names the read stage', async () => {
+  writeFile('noperm.txt', 'secret\n');
+  chmodSync(join(dir, 'noperm.txt'), 0o000);
+
+  const result = await editTool.execute(
+    { filePath: 'noperm.txt', oldText: 'secret', newText: 'x' },
+    { cwd: dir },
+  );
+
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('Failed to read noperm.txt');
+  expect(result.error).toContain('EACCES');
+});
+
+test.skipIf(isRoot)('a write failure names the write stage', async () => {
+  writeFile('ro.txt', 'a\n');
+  chmodSync(join(dir, 'ro.txt'), 0o444);
+
+  const result = await editTool.execute(
+    { filePath: 'ro.txt', oldText: 'a', newText: 'b' },
+    { cwd: dir },
+  );
+
+  expect(result.success).toBe(false);
+  expect(result.error).toContain('Failed to write ro.txt');
+  expect(result.error).toContain('EACCES');
 });

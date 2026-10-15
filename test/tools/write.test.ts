@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -74,3 +75,22 @@ test('a parent path that is a file surfaces the filesystem error', async () => {
   expect(result.output).toBe('');
   expect(result.error).toBeTruthy();
 });
+
+// 权限位对 root 不生效，跳过
+test.skipIf(process.getuid?.() === 0)(
+  'an unwritable file names the write stage',
+  async () => {
+    writeFileSync(join(dir, 'ro.txt'), 'old');
+    chmodSync(join(dir, 'ro.txt'), 0o444);
+
+    const result = await writeTool.execute(
+      { filePath: 'ro.txt', content: 'new' },
+      { cwd: dir },
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Failed to write ro.txt');
+    expect(result.error).toContain('EACCES');
+    expect(readFileSync(join(dir, 'ro.txt'), 'utf8')).toBe('old');
+  },
+);

@@ -18,6 +18,7 @@ export const style = {
   toolName: (text: string, failed: boolean) =>
     failed ? chalk.bold.red(text) : chalk.bold.yellow(text),
   dim: (text: string) => chalk.dim(text),
+  error: (text: string) => chalk.red(text),
   running: (text: string) => chalk.yellow(text),
 };
 

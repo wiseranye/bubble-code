@@ -17,6 +17,8 @@ export type ToolChatMessage = {
   name: string;
   input: string;
   output: string;
+  error?: string;
+  metadata?: Record<string, unknown>;
   status: 'running' | 'done';
   success: boolean;
 };
@@ -111,7 +113,8 @@ export class AgentSession {
                 content: block.thinking,
               });
             } else {
-              // 恢复的会话不在执行中，工具消息直接是终态；成功与否没有持久化，按成功展示
+              // 恢复的会话不在执行中，工具消息直接是终态；成功与否没有持久化，按成功展示，
+              // 另外两个展示字段由后面的 tool_result 补上（output、metadata）
               const toolMessage: ToolChatMessage = {
                 id: this.idCounter++,
                 role: 'tool',
@@ -133,6 +136,10 @@ export class AgentSession {
           const toolMessage = toolMessages.get(message.toolCallId);
           if (toolMessage !== undefined) {
             toolMessage.output = message.output;
+            // metadata 里有 diff 这类展示数据，丢了就只剩无行号的兜底渲染
+            if (message.metadata !== undefined) {
+              toolMessage.metadata = message.metadata;
+            }
           }
           break;
         }
@@ -268,6 +275,8 @@ export class AgentSession {
             ? {
                 ...message,
                 output: event.result.output,
+                error: event.result.error,
+                metadata: event.result.metadata,
                 success: event.success,
                 status: 'done',
               }

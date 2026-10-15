@@ -250,3 +250,186 @@ export function applyReplacementsPreservingUnchangedLines(
 
   return result;
 }
+
+/** 匹配区间在内容中的位置：匹配到的原文 + 1-based 起始行号 */
+export function locateMatch(
+  content: string,
+  matchIndex: number,
+  matchLength: number,
+): { text: string; startLine: number } {
+  const startLine = content.slice(0, matchIndex).split('\n').length;
+  return {
+    text: content.slice(matchIndex, matchIndex + matchLength),
+    startLine,
+  };
+}
+
+export type DiffEntryType = 'context' | 'del' | 'add';
+
+/**
+ * 一行 diff：context 有旧/新两个行号，del 只有旧行号，add 只有新行号，
+ * 行号都是各自文本内的 1-based 行号。
+ */
+export interface DiffLine {
+  type: DiffEntryType;
+  text: string;
+  oldLine?: number;
+  newLine?: number;
+}
+
+/** 改动之间被裁掉的行，渲染成一条省略分隔线 */
+export interface DiffElision {
+  type: 'elision';
+}
+
+export type DiffEntry = DiffLine | DiffElision;
+
+/** 改动前后各保留的上下文行数 */
+export const diffContextLines = 3;
+
+/** 按行切分：末尾单个换行只算行终止符，空文本没有行 */
+function splitDiffText(text: string): string[] {
+  if (text === '') return [];
+  const body = text.endsWith('\n') ? text.slice(0, -1) : text;
+  return body.split('\n');
+}
+
+interface DiffOp {
+  type: DiffEntryType;
+  text: string;
+}
+
+/** 逐行走一遍最长公共子序列，输出未编号、未裁上下文的原始操作序列 */
+function diffOps(oldLines: string[], newLines: string[]): DiffOp[] {
+  // 公共前后缀先砍掉，LCS 只需要处理真正变化的部分
+  let prefix = 0;
+  while (
+    prefix < oldLines.length &&
+    prefix < newLines.length &&
+    oldLines[prefix] === newLines[prefix]
+  ) {
+    prefix++;
+  }
+
+  let suffix = 0;
+  while (
+    suffix < oldLines.length - prefix &&
+    suffix < newLines.length - prefix &&
+    oldLines[oldLines.length - 1 - suffix] ===
+      newLines[newLines.length - 1 - suffix]
+  ) {
+    suffix++;
+  }
+
+  const oldMiddle = oldLines.slice(prefix, oldLines.length - suffix);
+  const newMiddle = newLines.slice(prefix, newLines.length - suffix);
+  const ops: DiffOp[] = oldLines
+    .slice(0, prefix)
+    .map(text => ({ type: 'context' as const, text }));
+
+  // lcs[i][j] = oldMiddle[i..] 与 newMiddle[j..] 的最长公共子序列长度
+  const lcs: number[][] = Array.from({ length: oldMiddle.length + 1 }, () =>
+    new Array<number>(newMiddle.length + 1).fill(0),
+  );
+  for (let i = oldMiddle.length - 1; i >= 0; i--) {
+    for (let j = newMiddle.length - 1; j >= 0; j--) {
+      lcs[i]![j] =
+        oldMiddle[i] === newMiddle[j]
+          ? lcs[i + 1]![j + 1]! + 1
+          : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+    }
+  }
+
+  let i = 0;
+  let j = 0;
+  while (i < oldMiddle.length && j < newMiddle.length) {
+    if (oldMiddle[i] === newMiddle[j]) {
+      ops.push({ type: 'context', text: oldMiddle[i]! });
+      i++;
+      j++;
+    } else if (lcs[i + 1]![j]! >= lcs[i]![j + 1]!) {
+      ops.push({ type: 'del', text: oldMiddle[i]! });
+      i++;
+    } else {
+      ops.push({ type: 'add', text: newMiddle[j]! });
+      j++;
+    }
+  }
+  while (i < oldMiddle.length) {
+    ops.push({ type: 'del', text: oldMiddle[i]! });
+    i++;
+  }
+  while (j < newMiddle.length) {
+    ops.push({ type: 'add', text: newMiddle[j]! });
+    j++;
+  }
+
+  for (const text of oldLines.slice(oldLines.length - suffix)) {
+    ops.push({ type: 'context', text });
+  }
+
+  return ops;
+}
+
+/**
+ * 按行 diff：改动前后各保留 context 行上下文，间隔更远的地方换成一条省略标记。
+ * context 给 Number.POSITIVE_INFINITY 时不裁任何行，也不产生省略标记。
+ * 两份文本完全一致时原样返回全部行。
+ */
+export function computeLineDiff(
+  oldText: string,
+  newText: string,
+  context: number = diffContextLines,
+): DiffEntry[] {
+  const lines: DiffLine[] = [];
+  let oldLine = 1;
+  let newLine = 1;
+  for (const op of diffOps(splitDiffText(oldText), splitDiffText(newText))) {
+    if (op.type === 'context') {
+      lines.push({ type: 'context', text: op.text, oldLine, newLine });
+      oldLine++;
+      newLine++;
+      continue;
+    }
+
+    if (op.type === 'del') {
+      lines.push({ type: 'del', text: op.text, oldLine });
+      oldLine++;
+      continue;
+    }
+
+    lines.push({ type: 'add', text: op.text, newLine });
+    newLine++;
+  }
+
+  const keep = new Array<boolean>(lines.length).fill(false);
+  for (let index = 0; index < lines.length; index++) {
+    if (lines[index]!.type === 'context') continue;
+
+    const from = Math.max(0, index - context);
+    const to = Math.min(lines.length - 1, index + context);
+    for (let cursor = from; cursor <= to; cursor++) {
+      keep[cursor] = true;
+    }
+  }
+  if (!keep.some(Boolean)) {
+    return lines;
+  }
+
+  const entries: DiffEntry[] = [];
+  let elided = false;
+  for (let index = 0; index < lines.length; index++) {
+    if (keep[index]) {
+      entries.push(lines[index]!);
+      elided = false;
+      continue;
+    }
+
+    if (!elided) {
+      entries.push({ type: 'elision' });
+      elided = true;
+    }
+  }
+
+  return entries;
+}

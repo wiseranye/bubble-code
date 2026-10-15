@@ -1,41 +1,20 @@
 import { readFile, writeFile } from 'node:fs/promises';
-import * as z from 'zod';
 import { resolvePath } from '../utils/paths.ts';
 import { splitBom } from '../utils/text.ts';
+import { editRenderer } from './edit.render.ts';
 import {
   applyReplacements,
   applyReplacementsPreservingUnchangedLines,
   detectLineEnding,
   findText,
+  locateMatch,
   normalizeToLF,
   restoreLineEndings,
   type TextReplacement,
 } from './edit-diff.ts';
+import { type EditInput, editInputSchema } from './edit-input.ts';
 import { defineTool } from './schema.ts';
 import type { ToolContext, ToolResult } from './types.ts';
-
-// 编辑文件输入
-const editInputSchema = z.object({
-  filePath: z.string().meta({
-    description: 'The file path to edit (relative or absolute)',
-  }),
-  oldText: z.string().meta({
-    description:
-      'Literal text to replace. Must match exactly. Line ending differences and minor unicode variants (smart quotes, dashes, trailing whitespace) are tolerated.',
-  }),
-  newText: z.string().meta({
-    description:
-      'Literal replacement text. Use an empty string to delete the match.',
-  }),
-  replaceAll: z.optional(
-    z.boolean().meta({
-      description:
-        'Replace all matches. Defaults to false, oldText must appear exactly once.',
-    }),
-  ),
-});
-
-export type EditInput = z.infer<typeof editInputSchema>;
 
 function failure(error: string): ToolResult {
   return { success: false, output: '', error };
@@ -45,6 +24,7 @@ export const editTool = defineTool({
   name: 'edit',
   description: 'Edit an existing UTF-8 text file by replacing literal text.',
   inputSchema: editInputSchema,
+  render: editRenderer,
   async execute(input: EditInput, ctx: ToolContext): Promise<ToolResult> {
     if (input.oldText === '') {
       return failure('oldText must not be empty');
@@ -61,14 +41,23 @@ export const editTool = defineTool({
 
     let rawContent: string;
     try {
-      rawContent = await readFile(absolutePath, 'utf8');
+      const buffer = await readFile(absolutePath);
+      rawContent = buffer.toString('utf8');
+      // 非法字节会被解码成 U+FFFD，整体重写将静默损坏非 UTF-8 文件：编码回字节与原 buffer 比对，不一致即拒绝
+      if (!Buffer.from(rawContent, 'utf8').equals(buffer)) {
+        return failure(
+          `File is not valid UTF-8: ${input.filePath}. It may be binary or use another encoding; edit refused to avoid corrupting it.`,
+        );
+      }
     } catch (error: unknown) {
       if (isErrnoException(error) && error.code === 'ENOENT') {
         return failure(`File not found: ${input.filePath}`);
       }
 
-      // 权限不足（EACCES）、是目录（EISDIR）等：消息原样给模型，方便纠正
-      return failure(error instanceof Error ? error.message : String(error));
+      // 权限不足（EACCES）、是目录（EISDIR）等：标注阶段，方便模型纠正
+      return failure(
+        `Failed to read ${input.filePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     // 剥离 BOM 再匹配：模型不会在 oldText 里写不可见的 U+FEFF，写回时拼回
@@ -128,14 +117,31 @@ export const editTool = defineTool({
         'utf8',
       );
     } catch (error: unknown) {
-      return failure(error instanceof Error ? error.message : String(error));
+      return failure(
+        `Failed to write ${input.filePath}: ${error instanceof Error ? error.message : String(error)}`,
+      );
     }
 
     const replaced = indices.length;
     const fuzzyNote = match.usedFuzzyMatch ? ' (fuzzy match)' : '';
+    // replaceAll 时 diff 只展示第一处改动（indices 按出现顺序排列）
+    const located = locateMatch(
+      match.contentForReplacement,
+      indices[0]!,
+      match.matchLength,
+    );
     return {
       success: true,
       output: `Replaced ${replaced} occurrence${replaced === 1 ? '' : 's'} in ${input.filePath}${fuzzyNote}`,
+      metadata: {
+        diff: {
+          filePath: input.filePath,
+          oldText: located.text,
+          newText,
+          startLine: located.startLine,
+          fuzzy: match.usedFuzzyMatch,
+        },
+      },
     };
   },
 });

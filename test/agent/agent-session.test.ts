@@ -18,6 +18,7 @@ import {
   type ToolChatMessage,
 } from '../../src/agent/agent-session.ts';
 import type { SessionEntry } from '../../src/agent/session-manager.ts';
+import type { AgentEvent } from '../../src/agent/types.ts';
 import {
   type AgentMessage,
   type AssistantMessage,
@@ -36,15 +37,30 @@ import { ToolRegistry } from '../../src/tools/types.ts';
 // 不隔离的话，每个构造 AgentSession 的用例都会往真实会话目录写垃圾文件
 let bubbleHome: string;
 
+// 本用例创建的全部会话：写入是异步入队的，afterEach 必须先把它们排空再删目录
+const openSessions: AgentSession[] = [];
+
 beforeEach(() => {
   bubbleHome = mkdtempSync(join(tmpdir(), 'bubble-home-'));
   vi.stubEnv('BUBBLE_HOME', bubbleHome);
 });
 
-afterEach(() => {
+afterEach(async () => {
+  // 会话写入先进队列，文件 open 又是异步的：不等落盘就删临时目录，
+  // 排队中的 open() 会拿到 ENOENT。那是无监听的流 error，不是 promise 拒绝，
+  // 队列上的 catch 接不住，直接变成未捕获异常
+  await Promise.all(openSessions.map(session => session.dispose()));
+  openSessions.length = 0;
   vi.unstubAllEnvs();
   rmSync(bubbleHome, { recursive: true, force: true });
 });
+
+// 所有 AgentSession 都从这里创建，afterEach 才知道要排空谁；重复 dispose 是幂等的
+function openSession(agent: Agent, sessionFile?: string): AgentSession {
+  const session = new AgentSession(agent, sessionFile);
+  openSessions.push(session);
+  return session;
+}
 
 // A mock implementation used until a real model backend is wired up. It
 // streams a canned reply token-by-token so the UI behaves like a real
@@ -141,7 +157,7 @@ test('streams assistant text and seals both messages', async () => {
     model: new MockModel(0),
     tools: new ToolRegistry(),
   });
-  const session = new AgentSession(agent);
+  const session = openSession(agent);
   const events = record(session);
 
   expect(session.messages.length).toBe(1);
@@ -207,7 +223,7 @@ test('running a tool creates a tool message that is updated and sealed', async (
     { text: '完成了。' },
   ]);
   const agent = new Agent({ model, tools: registry });
-  const session = new AgentSession(agent);
+  const session = openSession(agent);
   const events = record(session);
 
   session.prompt('跑一下');
@@ -245,10 +261,213 @@ test('running a tool creates a tool message that is updated and sealed', async (
   expect(streamingFlags(events)).toEqual([true, false]);
 });
 
+test('a failing tool keeps error and output separate', async () => {
+  const registry = new ToolRegistry();
+  registry.register(
+    defineTool({
+      name: 'boom',
+      description: 'boom',
+      inputSchema: z.object({}),
+      async execute() {
+        return { success: false, output: '部分输出', error: '命令失败' };
+      },
+    }),
+  );
+
+  const model = new ScriptedModel([
+    { toolCalls: [{ id: 'call-1', name: 'boom', input: {} }] },
+    { text: '知道了。' },
+  ]);
+  const agent = new Agent({ model, tools: registry });
+  const agentEvents: AgentEvent[] = [];
+  agent.subscribe(event => {
+    agentEvents.push(event);
+  });
+  const session = openSession(agent);
+
+  session.prompt('跑一下');
+  await until(() => !session.isStreaming);
+
+  const tool = session.messages.find(
+    (message): message is ToolChatMessage => message.role === 'tool',
+  );
+  expect(tool?.status).toBe('done');
+  expect(tool?.success).toBe(false);
+  // error 不并进 output，UI 和持久化各自拿到原始字段
+  expect(tool?.output).toBe('部分输出');
+  expect(tool?.error).toBe('命令失败');
+
+  const results = agentEvents.filter(
+    (event): event is Extract<AgentEvent, { type: 'tool_result' }> =>
+      event.type === 'tool_result',
+  );
+  expect(results.length).toBe(1);
+  expect(results[0]?.result.output).toBe('部分输出');
+  expect(results[0]?.result.error).toBe('命令失败');
+  expect(results[0]?.success).toBe(false);
+
+  // 回喂给模型的协议消息同样保持两个字段分离（拼文本在 llm 适配层做）
+  const contextResults = agent.state.messages.flatMap(message =>
+    message.role === 'tool_result' ? [message] : [],
+  );
+  expect(contextResults[0]?.output).toBe('部分输出');
+  expect(contextResults[0]?.error).toBe('命令失败');
+});
+
+test('tool result metadata is stored, persisted and reloaded', async () => {
+  const home = mkdtempSync(join(tmpdir(), 'bubble-session-'));
+  vi.stubEnv('BUBBLE_HOME', home);
+  try {
+    const registry = new ToolRegistry();
+    registry.register(
+      defineTool({
+        name: 'edit',
+        description: 'edit',
+        inputSchema: z.object({}),
+        async execute() {
+          return {
+            success: true,
+            output: '已修改',
+            metadata: { diff: '+1 -0' },
+          };
+        },
+      }),
+    );
+    const model = new ScriptedModel([
+      { toolCalls: [{ id: 'call-1', name: 'edit', input: {} }] },
+      { text: '完成。' },
+    ]);
+    const session = openSession(new Agent({ model, tools: registry }));
+
+    session.prompt('改一下');
+    await until(() => !session.isStreaming);
+
+    const tool = session.messages.find(
+      (message): message is ToolChatMessage => message.role === 'tool',
+    );
+    expect(tool?.metadata).toEqual({ diff: '+1 -0' });
+
+    // 等写入落盘再读文件
+    await session.dispose();
+    const [projectDir] = readdirSync(join(home, 'sessions'));
+    const [fileName] = readdirSync(join(home, 'sessions', projectDir!));
+    const filePath = join(home, 'sessions', projectDir!, fileName!);
+    const entries = readFileSync(filePath, 'utf8')
+      .split('\n')
+      .filter(Boolean)
+      .map(line => JSON.parse(line) as SessionEntry);
+    const stored = entries.flatMap(entry =>
+      entry.type === 'message' && entry.message.role === 'tool_result'
+        ? [entry.message]
+        : [],
+    );
+    expect(stored[0]?.metadata).toEqual({ diff: '+1 -0' });
+
+    // 重开一个会话读同一个文件：metadata 不丢
+    const resumedAgent = new Agent({
+      model: new MockModel(0),
+      tools: new ToolRegistry(),
+    });
+    const resumedSession = openSession(resumedAgent, filePath);
+    const resumed = resumedAgent.state.messages.flatMap(message =>
+      message.role === 'tool_result' ? [message] : [],
+    );
+    expect(resumed[0]?.metadata).toEqual({ diff: '+1 -0' });
+
+    // 重建的 ToolChatMessage 也要带上 output 与 metadata：UI 靠 metadata 画 diff
+    const resumedTool = resumedSession.messages.find(
+      (message): message is ToolChatMessage => message.role === 'tool',
+    );
+    expect(resumedTool?.output).toBe('已修改');
+    expect(resumedTool?.metadata).toEqual({ diff: '+1 -0' });
+  } finally {
+    vi.unstubAllEnvs();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test('a session file without error and metadata fields still loads', () => {
+  const home = mkdtempSync(join(tmpdir(), 'bubble-session-'));
+  try {
+    // 旧格式：tool_result 只有 output，没有 error / metadata 字段
+    const filePath = join(home, 'session-old.jsonl');
+    const entries: SessionEntry[] = [
+      {
+        type: 'metadata',
+        id: 'old',
+        cwd: process.cwd(),
+        version: 1,
+        timestamp: 1,
+      },
+      {
+        type: 'message',
+        id: 'e1',
+        timestamp: 2,
+        message: { role: 'user', content: '读一下 a.ts', timestamp: 2 },
+      },
+      {
+        type: 'message',
+        id: 'e2',
+        timestamp: 3,
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_call',
+              id: 'call-1',
+              name: 'read',
+              input: { filePath: 'a.ts' },
+            },
+          ],
+          stopReason: 'tool_use',
+          timestamp: 3,
+        },
+      },
+      {
+        type: 'message',
+        id: 'e3',
+        timestamp: 4,
+        message: {
+          role: 'tool_result',
+          toolName: 'read',
+          toolCallId: 'call-1',
+          output: '文件内容',
+          timestamp: 4,
+        },
+      },
+    ];
+    writeFileSync(
+      filePath,
+      `${entries.map(entry => JSON.stringify(entry)).join('\n')}\n`,
+    );
+
+    const agent = new Agent({
+      model: new MockModel(0),
+      tools: new ToolRegistry(),
+    });
+    const session = openSession(agent, filePath);
+
+    expect(agent.state.messages.map(message => message.role)).toEqual([
+      'system',
+      'user',
+      'assistant',
+      'tool_result',
+    ]);
+    const tool = session.messages.find(
+      (message): message is ToolChatMessage => message.role === 'tool',
+    );
+    expect(tool?.output).toBe('文件内容');
+    expect(tool?.error).toBeUndefined();
+    expect(tool?.metadata).toBeUndefined();
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
 test('thinking deltas accumulate into a separate dim message', async () => {
   const model = new ScriptedModel([{ thinking: '先想想。', text: '答案。' }]);
   const agent = new Agent({ model, tools: new ToolRegistry() });
-  const session = new AgentSession(agent);
+  const session = openSession(agent);
   const events = record(session);
 
   session.prompt('想想');
@@ -277,7 +496,7 @@ test('cancel seals the partial assistant text and appends an interrupt notice', 
     model: new HangingModel(),
     tools: new ToolRegistry(),
   });
-  const session = new AgentSession(agent);
+  const session = openSession(agent);
   const events = record(session);
 
   session.prompt('开始');
@@ -328,7 +547,7 @@ test('provider error surfaces as an assistant message', async () => {
     model: new FailingModel(),
     tools: new ToolRegistry(),
   });
-  const session = new AgentSession(agent);
+  const session = openSession(agent);
   const events = record(session);
 
   session.prompt('会失败');
@@ -344,7 +563,7 @@ test('send is ignored while generating and for empty input', async () => {
     model: new HangingModel(),
     tools: new ToolRegistry(),
   });
-  const session = new AgentSession(agent);
+  const session = openSession(agent);
 
   session.prompt('   ');
   expect(session.isStreaming).toBe(false);
@@ -380,7 +599,7 @@ test('session file writes assistant message before its tool results', async () =
       { toolCalls: [{ id: 'call-1', name: 'echo', input: { value: 'hi' } }] },
       { text: '完成了。' },
     ]);
-    const session = new AgentSession(new Agent({ model, tools: registry }));
+    const session = openSession(new Agent({ model, tools: registry }));
     session.prompt('跑一下');
     await until(() => !session.isStreaming);
     // 等写入落盘再读文件
@@ -469,7 +688,7 @@ test('resuming a session with tool_result before its assistant message repairs t
       model: new MockModel(0),
       tools: new ToolRegistry(),
     });
-    const session = new AgentSession(agent, filePath);
+    const session = openSession(agent, filePath);
 
     // 恢复后发给模型的消息：assistant 必须在它的 tool_result 之前
     const roles = agent.state.messages.map(message => message.role);
@@ -532,7 +751,7 @@ test('resume drops tool calls that have no matching tool result', () => {
       model: new MockModel(0),
       tools: new ToolRegistry(),
     });
-    new AgentSession(agent, filePath);
+    openSession(agent, filePath);
 
     const assistant = agent.state.messages.find(
       message => message.role === 'assistant',

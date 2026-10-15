@@ -1,5 +1,6 @@
 import OpenAI from 'openai';
 import type { ChatCompletionChunk } from 'openai/resources.js';
+import { toolResultContent } from '../tool-result.ts';
 import {
   type AssistantMessage,
   AssistantMessageEventStream,
@@ -118,7 +119,7 @@ export class OpenAiModel implements Model {
 
           return {
             role: 'tool',
-            content: message.output,
+            content: toolResultContent(message),
             tool_call_id: toolCallId,
           };
         }
