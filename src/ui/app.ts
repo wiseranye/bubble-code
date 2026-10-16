@@ -15,6 +15,7 @@ import {
   type TuiInputListenerResult,
   type ViewportTUI,
   VStack,
+  visibleWidth,
 } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
 import type {
@@ -38,6 +39,7 @@ import {
   matchSlashCommand,
   SlashCommandAutocomplete,
   type SlashCommandInvocation,
+  slashCommandArgumentPlaceholder,
   slashCommandTakesArgument,
 } from './slash-command.ts';
 import { editorTheme, style } from './theme.ts';
@@ -262,6 +264,16 @@ export function createChatApp(
   editor.onSubmit = text => {
     const invocation = matchSlashCommand(text);
     if (invocation !== undefined) {
+      // 带参数的命令只输了命令名：不发送，补成 "/name " 留在输入框里，
+      // 参数占位提示由 PromptEditor 渲染，用户接着输入参数
+      if (
+        invocation.command.argumentHint !== undefined &&
+        invocation.argument === ''
+      ) {
+        editor.setText(`/${invocation.command.name} `);
+        return;
+      }
+
       runSlashCommand(invocation, text);
       return;
     }
@@ -296,6 +308,18 @@ export function createChatApp(
   bindSession();
 }
 
+// 斜杠命令的参数占位提示从行尾 padding 里借位置：用暗色提示替换等宽的空格，
+// 整行宽度不变。空间不够（窄终端）就不显示
+function appendPlaceholder(line: string, placeholder: string): string {
+  const placeholderWidth = visibleWidth(placeholder);
+  const trailing = /( +)$/.exec(line)?.[1];
+  if (trailing === undefined || trailing.length <= placeholderWidth) {
+    return line;
+  }
+
+  return `${line.slice(0, line.length - trailing.length)}${style.dim(placeholder)}${' '.repeat(trailing.length - placeholderWidth)}`;
+}
+
 // 四边框输入框，首行内容区左侧 padding 放提示符，像 shell 的 prompt。
 // Editor 原生只画上下两条横线，左右边框和提示符都在 render 后处理；
 // 继承而不是包装，鼠标/焦点行为原样保留，handleMouse 里补偿边框占掉的偏移。
@@ -309,6 +333,15 @@ class PromptEditor extends Editor {
       this as unknown as { renderedVisibleLineCount: number }
     ).renderedVisibleLineCount;
     const bottomBorderIndex = 1 + visibleLineCount;
+    // 输入恰好是 "/rename" / "/rename " 这类还没填参数的命令时，
+    // 在首行文本末尾挂暗色的参数占位提示（如 <会话名称>）。
+    // 只在光标位于文本末尾时显示：提示贴在光标后面，光标挪回命令中间就不提示
+    const text = this.getText();
+    const cursor = this.getCursor();
+    const placeholder =
+      cursor.line === 0 && cursor.col === text.length
+        ? slashCommandArgumentPlaceholder(text)
+        : undefined;
 
     return lines.map((line, index) => {
       if (index > bottomBorderIndex) {
@@ -326,10 +359,14 @@ class PromptEditor extends Editor {
 
       // 首行内容：左侧 padding 的首列换成提示符。
       // ❯（U+276F）垂直居中，ASCII > 是基线对齐，视觉上会偏下
-      const content =
+      let content =
         index === 1 && line.startsWith(' ')
           ? style.prompt('❯') + line.slice(1)
           : line;
+      if (index === 1 && placeholder !== undefined) {
+        content = appendPlaceholder(content, placeholder);
+      }
+
       return `${this.borderColor('│')}${content}${this.borderColor('│')}`;
     });
   }

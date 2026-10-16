@@ -18,13 +18,32 @@ export const slashCommands: SlashCommand[] = [
   { name: 'resume', description: '恢复已有会话' },
   { name: 'fork', description: '从当前会话新建会话' },
   { name: 'model', description: '切换模型' },
-  { name: 'rename', description: '修改当前会话名称', argumentHint: '新标题' },
+  { name: 'rename', description: '修改当前会话名称', argumentHint: '会话名称' },
   { name: 'compact', description: '压缩当前会话' },
 ];
 
 export function slashCommandTakesArgument(name: string): boolean {
   const command = slashCommands.find(entry => entry.name === name);
   return command?.argumentHint !== undefined;
+}
+
+// 文本恰好是带参数命令的命令名（还没输入参数）时，返回跟在文本后面的占位提示。
+// 命令名后面还没空格时提示自带一个空格，保证显示成 "/rename <会话名称>"
+export function slashCommandArgumentPlaceholder(
+  text: string,
+): string | undefined {
+  const match = /^\/(\S+)([^\S\n]*)$/.exec(text);
+  if (match === null) {
+    return undefined;
+  }
+
+  const command = slashCommands.find(entry => entry.name === match[1]);
+  if (command?.argumentHint === undefined) {
+    return undefined;
+  }
+
+  const gap = match[2] === '' ? ' ' : '';
+  return `${gap}<${command.argumentHint}>`;
 }
 
 // 行首输入 / 时弹出命令列表。只做命令补全，不做文件路径补全
@@ -55,7 +74,7 @@ export class SlashCommandAutocomplete implements AutocompleteProvider {
       .map(command => ({
         value: command.name,
         label: command.name,
-        // 带参数的命令把参数提示放在描述前面，比如：rename  新标题 — 修改当前会话名称
+        // 带参数的命令把参数提示放在描述前面，比如：rename  会话名称 — 修改当前会话名称
         description: command.argumentHint
           ? `${command.argumentHint} — ${command.description}`
           : command.description,
