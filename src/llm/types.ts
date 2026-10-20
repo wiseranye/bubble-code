@@ -7,12 +7,13 @@ export type StreamOptions = {
   signal?: AbortSignal;
 };
 
-export type Model = {
+// 大模型接口抽象
+export interface ModelApi {
   stream(
     messages: Message[],
     options?: StreamOptions,
   ): AssistantMessageEventStream;
-};
+}
 
 export type Text = {
   type: 'text';
@@ -32,12 +33,21 @@ export type ToolCall = {
   input: Record<string, unknown>;
 };
 
+// 与 pi-ai 的 Usage 形状对齐（含成本与 reasoning token 数），适配层直传
 export type Usage = {
   input: number;
   output: number;
-  cachedRead: number;
-  cachedWrite: number;
+  cacheRead: number;
+  cacheWrite: number;
   totalTokens: number;
+  reasoning?: number;
+  cost: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheWrite: number;
+    total: number;
+  };
 };
 
 export type AssistantMessage = {

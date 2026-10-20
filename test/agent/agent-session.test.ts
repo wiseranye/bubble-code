@@ -24,7 +24,7 @@ import {
   type AssistantMessage,
   AssistantMessageEventStream,
   type Message,
-  type Model,
+  type ModelApi,
   type StreamOptions,
   type Text,
   type Thinking,
@@ -65,7 +65,7 @@ function openSession(agent: Agent, sessionFile?: string): AgentSession {
 // A mock implementation used until a real model backend is wired up. It
 // streams a canned reply token-by-token so the UI behaves like a real
 // streaming agent.
-class MockModel implements Model {
+class MockModel implements ModelApi {
   private readonly delay: number;
 
   constructor(delay: number = 20) {
@@ -154,7 +154,7 @@ function assistantMessages(session: AgentSession): TextChatMessage[] {
 
 test('streams assistant text and seals both messages', async () => {
   const agent = new Agent({
-    model: new MockModel(0),
+    modelApi: new MockModel(0),
     tools: new ToolRegistry(),
   });
   const session = openSession(agent);
@@ -222,7 +222,7 @@ test('running a tool creates a tool message that is updated and sealed', async (
     },
     { text: '完成了。' },
   ]);
-  const agent = new Agent({ model, tools: registry });
+  const agent = new Agent({ modelApi: model, tools: registry });
   const session = openSession(agent);
   const events = record(session);
 
@@ -278,7 +278,7 @@ test('a failing tool keeps error and output separate', async () => {
     { toolCalls: [{ id: 'call-1', name: 'boom', input: {} }] },
     { text: '知道了。' },
   ]);
-  const agent = new Agent({ model, tools: registry });
+  const agent = new Agent({ modelApi: model, tools: registry });
   const agentEvents: AgentEvent[] = [];
   agent.subscribe(event => {
     agentEvents.push(event);
@@ -337,7 +337,9 @@ test('tool result metadata is stored, persisted and reloaded', async () => {
       { toolCalls: [{ id: 'call-1', name: 'edit', input: {} }] },
       { text: '完成。' },
     ]);
-    const session = openSession(new Agent({ model, tools: registry }));
+    const session = openSession(
+      new Agent({ modelApi: model, tools: registry }),
+    );
 
     session.prompt('改一下');
     await until(() => !session.isStreaming);
@@ -365,7 +367,7 @@ test('tool result metadata is stored, persisted and reloaded', async () => {
 
     // 重开一个会话读同一个文件：metadata 不丢
     const resumedAgent = new Agent({
-      model: new MockModel(0),
+      modelApi: new MockModel(0),
       tools: new ToolRegistry(),
     });
     const resumedSession = openSession(resumedAgent, filePath);
@@ -442,7 +444,7 @@ test('a session file without error and metadata fields still loads', () => {
     );
 
     const agent = new Agent({
-      model: new MockModel(0),
+      modelApi: new MockModel(0),
       tools: new ToolRegistry(),
     });
     const session = openSession(agent, filePath);
@@ -466,7 +468,7 @@ test('a session file without error and metadata fields still loads', () => {
 
 test('thinking deltas accumulate into a separate dim message', async () => {
   const model = new ScriptedModel([{ thinking: '先想想。', text: '答案。' }]);
-  const agent = new Agent({ model, tools: new ToolRegistry() });
+  const agent = new Agent({ modelApi: model, tools: new ToolRegistry() });
   const session = openSession(agent);
   const events = record(session);
 
@@ -493,7 +495,7 @@ test('thinking deltas accumulate into a separate dim message', async () => {
 
 test('cancel seals the partial assistant text and appends an interrupt notice', async () => {
   const agent = new Agent({
-    model: new HangingModel(),
+    modelApi: new HangingModel(),
     tools: new ToolRegistry(),
   });
   const session = openSession(agent);
@@ -544,7 +546,7 @@ test('cancel seals the partial assistant text and appends an interrupt notice', 
 
 test('provider error surfaces as an assistant message', async () => {
   const agent = new Agent({
-    model: new FailingModel(),
+    modelApi: new FailingModel(),
     tools: new ToolRegistry(),
   });
   const session = openSession(agent);
@@ -560,7 +562,7 @@ test('provider error surfaces as an assistant message', async () => {
 
 test('send is ignored while generating and for empty input', async () => {
   const agent = new Agent({
-    model: new HangingModel(),
+    modelApi: new HangingModel(),
     tools: new ToolRegistry(),
   });
   const session = openSession(agent);
@@ -599,7 +601,9 @@ test('session file writes assistant message before its tool results', async () =
       { toolCalls: [{ id: 'call-1', name: 'echo', input: { value: 'hi' } }] },
       { text: '完成了。' },
     ]);
-    const session = openSession(new Agent({ model, tools: registry }));
+    const session = openSession(
+      new Agent({ modelApi: model, tools: registry }),
+    );
     session.prompt('跑一下');
     await until(() => !session.isStreaming);
     // 等写入落盘再读文件
@@ -685,7 +689,7 @@ test('resuming a session with tool_result before its assistant message repairs t
     );
 
     const agent = new Agent({
-      model: new MockModel(0),
+      modelApi: new MockModel(0),
       tools: new ToolRegistry(),
     });
     const session = openSession(agent, filePath);
@@ -748,7 +752,7 @@ test('resume drops tool calls that have no matching tool result', () => {
     );
 
     const agent = new Agent({
-      model: new MockModel(0),
+      modelApi: new MockModel(0),
       tools: new ToolRegistry(),
     });
     openSession(agent, filePath);
@@ -775,7 +779,7 @@ type ScriptTurn = {
 };
 
 // 按剧本逐轮回放 StreamChunkEvent；每次 stream 调用消费一轮
-class ScriptedModel implements Model {
+class ScriptedModel implements ModelApi {
   private index = 0;
   private readonly script: ScriptTurn[];
 
@@ -885,7 +889,7 @@ class ScriptedModel implements Model {
 }
 
 // 流出一小段文本后挂住，直到外部 abort 才以 error(aborted) 收尾
-class HangingModel implements Model {
+class HangingModel implements ModelApi {
   stream(
     _messages: AgentMessage[],
     options?: StreamOptions,
@@ -930,7 +934,7 @@ class HangingModel implements Model {
 }
 
 // 建连即失败：只发一个 error 事件
-class FailingModel implements Model {
+class FailingModel implements ModelApi {
   stream(): AssistantMessageEventStream {
     const stream = new AssistantMessageEventStream();
     const output: AssistantMessage = {

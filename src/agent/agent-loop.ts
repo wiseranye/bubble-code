@@ -1,7 +1,7 @@
 import type {
   AgentMessage,
   AssistantMessage,
-  Model,
+  ModelApi,
   ToolCall,
   ToolResultMessage,
 } from '../llm/types.ts';
@@ -18,7 +18,7 @@ export async function runAgentLoop(
   prompt: string,
   context: AgentContext,
   emit: AgentEventSink,
-  model: Model,
+  modelApi: ModelApi,
   signal: AbortSignal | undefined,
   options?: AgentLoopOptions,
 ): Promise<AgentMessage[]> {
@@ -42,7 +42,7 @@ export async function runAgentLoop(
     options = {};
   }
 
-  await runLoop(runContext, options, emit, signal, model, newMessages);
+  await runLoop(runContext, options, emit, signal, modelApi, newMessages);
 
   return newMessages;
 }
@@ -53,7 +53,7 @@ async function runLoop(
   _options: AgentLoopOptions,
   emit: AgentEventSink,
   signal: AbortSignal | undefined,
-  model: Model,
+  modelApi: ModelApi,
   newMessages: AgentMessage[],
 ): Promise<AgentMessage[]> {
   // 额外参数
@@ -77,7 +77,10 @@ async function runLoop(
     const waitingToolCalls: ToolCall[] = [];
     // 模型输出必须顺序消费，不能并发拉取。
     // eslint-disable-next-line no-await-in-loop
-    for await (const event of model.stream(context.messages, streamOptions)) {
+    for await (const event of modelApi.stream(
+      context.messages,
+      streamOptions,
+    )) {
       switch (event.type) {
         // 流式增量
         case 'text_delta': {

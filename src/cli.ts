@@ -4,13 +4,14 @@ import { ProcessTerminal, TuiAltScreen } from '@earendil-works/pi-tui';
 import meow from 'meow';
 import { Agent } from './agent/agent.ts';
 import { AgentSession } from './agent/agent-session.ts';
-import { OpenAiModel } from './llm/api/openai-completions.ts';
+import { initRuntime } from './agent/runtime.ts';
+import { PiModelApi } from './llm/api/pi-model-api.ts';
 import {
-  loadSettings,
-  type ModelDef,
-  type Provider,
+  type ModelConfig,
+  type ProviderConfig,
+  SettingManager,
   type Settings,
-} from './settings.ts';
+} from './setting-manager.ts';
 import { newToolRegistry } from './tools/index.ts';
 import { createChatApp } from './ui/app.ts';
 import { setTerminalTitle } from './utils/shell.ts';
@@ -36,38 +37,33 @@ if (!process.stdin.isTTY) {
   process.exit(1);
 }
 
-function findModel(settings: Settings): {
-  provider: Provider;
-  model: ModelDef;
-} {
+function findModel(
+  settings: Settings,
+): { provider: ProviderConfig; model: ModelConfig } | undefined {
   for (const provider of settings.providers) {
-    if (!provider.models) {
-      continue;
-    }
-
-    for (const modelDef of provider.models) {
-      if (modelDef) {
-        return {
-          provider,
-          model: modelDef,
-        };
-      }
+    const model = provider.models[0];
+    if (model) {
+      return { provider, model };
     }
   }
 
-  throw new Error('no model available!');
+  // 没配模型不拦启动；首次发消息时由 Agent 提示
+  return undefined;
 }
 
 async function main(): Promise<void> {
   setTerminalTitle('bubble');
-  const settings = await loadSettings();
-  const { provider, model } = findModel(settings);
+  const settings = await new SettingManager(initRuntime()).load();
+  const found = findModel(settings);
   // 工具注册中心同时给 Agent 和 UI 用：UI 靠它拿到每个工具的渲染器
   const tools = newToolRegistry();
   // 每个会话一个 Agent：协议历史随会话走，/new 和 /resume 都不会串上下文
   const createAgent = (): Agent =>
     new Agent({
-      model: new OpenAiModel(provider.baseUrl, provider.apiKey, model.id),
+      modelApi:
+        found === undefined
+          ? undefined
+          : new PiModelApi(found.provider, found.model),
       tools,
     });
   const terminal = new ProcessTerminal();

@@ -1,6 +1,6 @@
 import type {
   AgentMessage,
-  Model,
+  ModelApi,
   Text,
   Thinking,
   ToolCall,
@@ -47,7 +47,7 @@ export type AgentContext = {
 };
 
 export interface AgentState {
-  model: Model;
+  modelApi?: ModelApi;
   set messages(messages: AgentMessage[]);
   get messages(): AgentMessage[];
 }

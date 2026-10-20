@@ -2,18 +2,12 @@
   "providers": [
     {
       "name": "deepseek",
-      "type": "openai-compatible",
+      "type": "openai-completions",
       "baseUrl": "https://api.deepseek.com",
-      "models": [
-        {
-          "id": "deepseek-flash",
-          "name": "deepseek-flash",
-          "reasoning": false,
-          "input": ["text"],
-          "maxTokens": 128000,
-          "contextWindow": 1000000
-        }
-      ]
+      "apiKey": "",
+      // 命中 pi-ai builtin catalog 的模型只需写 id，元数据自动带出来；
+      // 其余字段（reasoning/input/maxTokens/contextWindow）写了则覆盖 catalog
+      "models": [{ "id": "deepseek-flash" }]
     }
   ]
 }

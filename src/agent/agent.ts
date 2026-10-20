@@ -1,13 +1,13 @@
 // 有状态门面
 
-import type { Model } from '../llm/types.ts';
+import type { ModelApi } from '../llm/types.ts';
 import type { ToolRegistry } from '../tools/types.ts';
 import { runAgentLoop } from './agent-loop.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import type { AgentContext, AgentEvent, AgentState } from './types.ts';
 
 export interface AgentOptions {
-  model: Model;
+  modelApi?: ModelApi;
   tools: ToolRegistry;
 }
 
@@ -19,11 +19,11 @@ export class Agent {
     (event: AgentEvent, signal?: AbortSignal) => Promise<void> | void
   >();
 
-  constructor({ model, tools }: AgentOptions) {
+  constructor({ modelApi, tools }: AgentOptions) {
     this._tools = tools;
     this._state = {
-      model: model,
       messages: [],
+      modelApi: modelApi,
     };
     this._state.messages.push({
       role: 'system',
@@ -47,6 +47,12 @@ export class Agent {
     input: string,
     { signal }: { signal?: AbortSignal } = {},
   ): Promise<void> {
+    if (!this._state.modelApi) {
+      // 配置问题不是生成失败，直接抛出，不走 run_end 事件
+      throw new Error(
+        '未配置模型，请先在 settings.jsonc 的 providers 中配置模型',
+      );
+    }
     const context: AgentContext = {
       tools: this._tools,
       messages: this._state.messages,
@@ -55,7 +61,7 @@ export class Agent {
       input,
       context,
       async event => this._onEvent(event, signal),
-      this._state.model,
+      this._state.modelApi,
       signal,
     );
 
