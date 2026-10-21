@@ -184,6 +184,12 @@ export class AgentSession {
               content: block.text,
             });
           } else if (block.type === 'thinking') {
+            // 纯空白思考（Kimi 思考流会发 "\n\n" 这样的 delta）不建消息，
+            // 否则恢复出来的会话里它显示为一条空消息
+            if (block.thinking.trim() === '') {
+              continue;
+            }
+
             this.store.push({
               id: this.idCounter++,
               role: 'thinking',
@@ -686,6 +692,13 @@ export class AgentSession {
           ? { ...message, content: message.content + delta }
           : message,
       );
+      return;
+    }
+
+    // 新段落的第一个增量是纯空白时不建段：Kimi 的思考流会发 "\n\n" 这样的
+    // 空白 delta，建出来就是一条看似为空的消息；段已存在后空白照常追加
+    // （段内空行是内容的一部分）
+    if (delta.trim() === '') {
       return;
     }
 

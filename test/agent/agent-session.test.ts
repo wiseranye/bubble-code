@@ -1030,3 +1030,65 @@ test('setModel contextWindow applies to auto compaction on the next prompt', asy
   ).toBe(true);
   expect(assistantMessages(session).at(-1)?.content).toContain('完成。');
 });
+
+test('whitespace-only thinking deltas do not create an empty thinking message', async () => {
+  // Kimi 的思考流会发 "\n\n" 这样的纯空白 delta：建出来就是一条看似为空的消息
+  const model = new ScriptedModel([{ thinking: '\n\n', text: '回复。' }]);
+  const agent = new Agent({ modelApi: model, tools: new ToolRegistry() });
+  const session = openSession(agent);
+
+  session.prompt('你好');
+  await until(() => !session.isStreaming);
+
+  expect(session.messages.some(message => message.role === 'thinking')).toBe(
+    false,
+  );
+  expect(assistantMessages(session).at(-1)?.content).toContain('回复。');
+});
+
+test('restore skips whitespace-only thinking blocks from the session file', () => {
+  const filePath = join(bubbleHome, 'session-blank-thinking.jsonl');
+  const entries: SessionEntry[] = [
+    {
+      type: 'metadata',
+      id: 'blank-thinking',
+      cwd: process.cwd(),
+      version: 1,
+      timestamp: 1,
+    },
+    {
+      type: 'message',
+      id: 'e1',
+      timestamp: 2,
+      message: { role: 'user', content: '你好', timestamp: 2 },
+    },
+    {
+      type: 'message',
+      id: 'e2',
+      timestamp: 3,
+      message: {
+        role: 'assistant',
+        content: [
+          { type: 'thinking', thinking: '\n\n' },
+          { type: 'text', text: '回复。' },
+        ],
+        stopReason: 'stop',
+        timestamp: 3,
+      },
+    },
+  ];
+  writeFileSync(
+    filePath,
+    `${entries.map(entry => JSON.stringify(entry)).join('\n')}\n`,
+  );
+
+  const session = openSession(
+    new Agent({ modelApi: new MockModel(0), tools: new ToolRegistry() }),
+    filePath,
+  );
+
+  expect(session.messages.some(message => message.role === 'thinking')).toBe(
+    false,
+  );
+  expect(assistantMessages(session).at(-1)?.content).toBe('回复。');
+});
