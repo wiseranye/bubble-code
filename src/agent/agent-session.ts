@@ -1,4 +1,9 @@
-import type { AgentMessage, ModelApi, UserMessage } from '../llm/types.ts';
+import type {
+  AgentMessage,
+  ModelApi,
+  Usage,
+  UserMessage,
+} from '../llm/types.ts';
 import type { Agent } from './agent.ts';
 import {
   buildSummarizationMessages,
@@ -42,7 +47,17 @@ export type AgentSessionEvent =
   | { type: 'message_sealed'; message: ChatMessage }
   | { type: 'streaming_changed'; isStreaming: boolean }
   // 压缩期间 UI 只禁用输入，不动 Bubbling 指示器（消息区有「压缩中」行）
-  | { type: 'compaction_changed'; isCompacting: boolean };
+  | { type: 'compaction_changed'; isCompacting: boolean }
+  // prompt 提交、每轮 turn 结束、整次 run 结束时发出；UI 用它异步刷新 Git 分支
+  | { type: 'status_refresh' };
+
+export type SessionContextStats = {
+  usedTokens: number;
+  contextWindow: number;
+  cacheRead: number | undefined;
+  cacheWrite: number | undefined;
+  promptTokens: number | undefined;
+};
 
 type Listener = (event: AgentSessionEvent) => void;
 
@@ -79,6 +94,8 @@ export class AgentSession {
   // 当前 run 新增的消息对象：循环内压缩时靠它把 newMessages 从 state 投影里剔出去
   // （它们由 runAgentLoop 在 run 结束时统一 push 进 state）
   private currentRunMessages = new Set<AgentMessage>();
+  // 同一批消息的顺序副本：agent.state 要等 run 结束才合并，状态栏中途也要能读到
+  private currentRunOrder: AgentMessage[] = [];
   // 自动压缩失败后停止重试，直到新一轮产生真实 usage
   private autoCompactFailed = false;
   private compacting = false;
@@ -245,6 +262,40 @@ export class AgentSession {
     return this.compacting;
   }
 
+  // 状态栏用的上下文统计：已用 token 与自动压缩同口径，缓存数据取最近一条 usage
+  get contextStats(): SessionContextStats {
+    // agent.state 在 run 结束前不含本轮新增消息；把顺序副本拼在后面。
+    // known 防的是 state 已合并、finally 还没清空顺序副本的短暂窗口
+    const stateMessages = this.agent.state.messages;
+    const messages = [...stateMessages];
+    const known = new Set(stateMessages);
+    for (const message of this.currentRunOrder) {
+      if (!known.has(message)) {
+        messages.push(message);
+      }
+    }
+
+    let usage: Usage | undefined;
+    for (let index = messages.length - 1; index >= 0; index--) {
+      const message = messages[index];
+      if (message?.role === 'assistant' && message.usage !== undefined) {
+        usage = message.usage;
+        break;
+      }
+    }
+
+    return {
+      usedTokens: estimateContextTokens(messages),
+      contextWindow: this.compactConfig.contextWindow,
+      cacheRead: usage?.cacheRead,
+      cacheWrite: usage?.cacheWrite,
+      promptTokens:
+        usage === undefined
+          ? undefined
+          : usage.input + usage.cacheRead + usage.cacheWrite,
+    };
+  }
+
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -270,6 +321,7 @@ export class AgentSession {
     this.openBlock = undefined;
     this.toolBlocks.clear();
     this.emit({ type: 'streaming_changed', isStreaming: true });
+    this.emit({ type: 'status_refresh' });
 
     const controller = new AbortController();
     this.abortController = controller;
@@ -331,6 +383,7 @@ export class AgentSession {
     this.entryIds.set(userMessage, userEntryId);
     this.messagesSinceCompaction++;
     this.currentRunMessages = new Set([userMessage]);
+    this.currentRunOrder = [userMessage];
     try {
       await this.agent.prompt(userMessage, {
         signal: controller.signal,
@@ -346,6 +399,7 @@ export class AgentSession {
       }
     } finally {
       this.currentRunMessages = new Set();
+      this.currentRunOrder = [];
       // 收不到 run_end（比如 emit 抛错）时兜底收口，streaming 标志必须配对
       if (this.generating) {
         this.finishRun();
@@ -568,6 +622,7 @@ export class AgentSession {
           this.entryIds.set(event.message, entryId);
           this.messagesSinceCompaction++;
           this.currentRunMessages.add(event.message);
+          this.currentRunOrder.push(event.message);
           // 新一轮真实 usage 落地，自动压缩的失败状态解除
           if (
             event.message.role === 'assistant' &&
@@ -582,8 +637,10 @@ export class AgentSession {
           this.entryIds.set(toolResult, entryId);
           this.messagesSinceCompaction++;
           this.currentRunMessages.add(toolResult);
+          this.currentRunOrder.push(toolResult);
         }
 
+        this.emit({ type: 'status_refresh' });
         break;
       }
 
@@ -650,6 +707,7 @@ export class AgentSession {
     this.generating = false;
     this.abortController = undefined;
     this.emit({ type: 'streaming_changed', isStreaming: false });
+    this.emit({ type: 'status_refresh' });
   }
 
   // 系统提示一提交就是终态，和用户消息一样 added 后立刻 sealed

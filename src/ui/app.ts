@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import process from 'node:process';
 import {
   type Component,
@@ -10,6 +11,7 @@ import {
   ScrollView,
   type SelectList,
   Spacer,
+  type StackChild,
   stripTerminalSequences,
   Text,
   type TuiInputListenerResult,
@@ -28,7 +30,9 @@ import {
   type SessionFileEntry,
 } from '../agent/session-manager.ts';
 import type { ModelCatalog, ModelChoice } from '../llm/model-catalog.ts';
+import type { StatusBarConfig } from '../setting-manager.ts';
 import type { ToolRegistry } from '../tools/types.ts';
+import { readGitBranch } from '../utils/git.ts';
 import { LogoBanner } from './logo.ts';
 import {
   AssistantMessageView,
@@ -44,6 +48,7 @@ import {
   slashCommandArgumentPlaceholder,
   slashCommandTakesArgument,
 } from './slash-command.ts';
+import { StatusBar, type StatusBarData } from './status-bar.ts';
 import { editorTheme, style } from './theme.ts';
 
 // 底部提示行
@@ -55,6 +60,7 @@ export function createChatApp(
   createSession: (sessionFile?: string) => AgentSession,
   tools: ToolRegistry,
   catalog: ModelCatalog,
+  statusBarConfig: StatusBarConfig,
 ): void {
   // 转录文档：启动横幅 + 消息区。全屏模式下它挂在 ScrollView 里滚动，
   // /new、/resume 只清消息区，横幅不会被带走
@@ -67,6 +73,71 @@ export function createChatApp(
   let indicator: BubblingIndicator | undefined;
 
   let session = createSession();
+  let branch: string | undefined;
+  let branchRefreshId = 0;
+
+  // 状态栏的 Git 分支：异步刷新，旧请求的结果直接丢弃；禁用状态栏时不启动 git
+  const refreshBranch = (): void => {
+    if (!statusBarConfig.enable) {
+      return;
+    }
+
+    const refreshId = ++branchRefreshId;
+    void readGitBranch(process.cwd()).then(state => {
+      if (refreshId !== branchRefreshId) {
+        return;
+      }
+
+      if (state.kind === 'branch') {
+        branch = state.name;
+      } else if (state.kind === 'detached') {
+        branch = `@${state.sha}`;
+      } else {
+        branch = undefined;
+      }
+
+      tui.requestRender();
+    });
+  };
+
+  const getStatusData = (): StatusBarData => {
+    const choice = catalog.current;
+    const stats = session.contextStats;
+    const cacheRead = stats.cacheRead;
+    const cacheWrite = stats.cacheWrite;
+    const cache: StatusBarData['cache'] =
+      choice !== undefined &&
+      cacheRead !== undefined &&
+      cacheWrite !== undefined &&
+      cacheRead + cacheWrite > 0
+        ? { read: cacheRead, promptTokens: stats.promptTokens ?? 0 }
+        : undefined;
+
+    return {
+      model:
+        choice === undefined
+          ? undefined
+          : {
+              label: `${choice.provider.name}/${choice.model.name ?? choice.model.id}`,
+              reasoning: choice.model.reasoning,
+            },
+      cwd: process.cwd(),
+      homeDir: homedir(),
+      branch,
+      context:
+        choice === undefined
+          ? undefined
+          : { used: stats.usedTokens, window: stats.contextWindow },
+      cache,
+    };
+  };
+
+  const statusBarView = statusBarConfig.enable
+    ? new StatusBar({
+        style: statusBarConfig.style,
+        getData: getStatusData,
+      })
+    : undefined;
 
   const addMessage = (message: ChatMessage): void => {
     const view = createMessageView(message, tools, () => tui.requestRender());
@@ -155,6 +226,11 @@ export function createChatApp(
         // 压缩不碰 Bubbling 指示器（消息区有「压缩中」行），只禁用输入
         compacting = event.isCompacting;
         editor.disableSubmit = streaming || compacting;
+        break;
+      }
+
+      case 'status_refresh': {
+        refreshBranch();
         break;
       }
 
@@ -363,12 +439,18 @@ export function createChatApp(
     follow: 'end',
     primary: true,
   });
-  // 底部固定区，不随转录滚动：生成状态、输入框、提示行
-  const dock = new VStack([
+  // 底部固定区，不随转录滚动：生成状态、状态栏、输入框、提示行
+  const dockChildren: StackChild[] = [
     { component: indicatorSlot, shrink: 1, minSize: 0 },
+  ];
+  if (statusBarView !== undefined) {
+    dockChildren.push({ component: statusBarView, shrink: 1, minSize: 0 });
+  }
+  dockChildren.push(
     { component: editor, shrink: 1, minSize: 3 },
     { component: new Text(style.dim(hintText), 1, 0), shrink: 1, minSize: 0 },
-  ]);
+  );
+  const dock = new VStack(dockChildren);
   // 全屏布局：转录区吃满剩余高度，底部固定区按内容高度贴着视口下沿
   tui.setLayoutRoot(
     new VStack([
@@ -381,6 +463,7 @@ export function createChatApp(
 
   // 已有的消息（欢迎语）在订阅之前就存在，bindSession 里直接补建视图
   bindSession();
+  refreshBranch();
 }
 
 // 斜杠命令的参数占位提示从行尾 padding 里借位置：用暗色提示替换等宽的空格，

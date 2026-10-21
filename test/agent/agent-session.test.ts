@@ -29,6 +29,7 @@ import {
   type Text,
   type Thinking,
   type ToolCall,
+  type Usage,
 } from '../../src/llm/types.ts';
 import { defineTool } from '../../src/tools/schema.ts';
 import { ToolRegistry } from '../../src/tools/types.ts';
@@ -199,6 +200,86 @@ test('streams assistant text and seals both messages', async () => {
 
   // Streaming 开关严格成对
   expect(streamingFlags(events)).toEqual([true, false]);
+});
+
+const testUsage: Usage = {
+  input: 1000,
+  output: 500,
+  cacheRead: 3000,
+  cacheWrite: 500,
+  totalTokens: 5000,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+test('contextStats anchors on the latest usage and emits status refreshes', async () => {
+  const model = new ScriptedModel([{ text: '完成。', usage: testUsage }]);
+  const agent = new Agent({ modelApi: model, tools: new ToolRegistry() });
+  const session = openSession(agent);
+  const events = record(session);
+
+  session.prompt('你好');
+  await until(() => !session.isStreaming);
+
+  const stats = session.contextStats;
+  expect(stats.usedTokens).toBe(5000);
+  expect(stats.contextWindow).toBe(256_000);
+  expect(stats.cacheRead).toBe(3000);
+  expect(stats.cacheWrite).toBe(500);
+  expect(stats.promptTokens).toBe(4500);
+
+  // 提交时、turn_end、run_end 各一次
+  expect(events.filter(event => event.type === 'status_refresh').length).toBe(
+    3,
+  );
+});
+
+test('contextStats includes the in-flight run before the agent state is merged', async () => {
+  const registry = new ToolRegistry();
+  registry.register(
+    defineTool({
+      name: 'echo',
+      description: 'echo',
+      inputSchema: z.object({}),
+      async execute() {
+        return { success: true, output: 'ok' };
+      },
+    }),
+  );
+  const model = new ScriptedModel([
+    {
+      text: '第一轮',
+      usage: testUsage,
+      toolCalls: [{ id: 'call-1', name: 'echo', input: {} }],
+    },
+    { text: '第二轮' },
+  ]);
+  const session = openSession(new Agent({ modelApi: model, tools: registry }));
+
+  let usedDuringRefresh: number | undefined;
+  session.subscribe(event => {
+    if (event.type === 'status_refresh') {
+      usedDuringRefresh = session.contextStats.usedTokens;
+    }
+  });
+
+  session.prompt('开始');
+  await until(() => !session.isStreaming);
+
+  // run_end 时的刷新还没等到 agent.state 合并本轮消息，但仍应看到真实 usage
+  expect(usedDuringRefresh).toBeGreaterThan(testUsage.totalTokens);
+});
+
+test('contextStats has no cache data before the first response', () => {
+  const session = openSession(
+    new Agent({ modelApi: new MockModel(0), tools: new ToolRegistry() }),
+  );
+  const stats = session.contextStats;
+
+  expect(stats.usedTokens).toBeGreaterThan(0);
+  expect(stats.contextWindow).toBe(256_000);
+  expect(stats.cacheRead).toBeUndefined();
+  expect(stats.cacheWrite).toBeUndefined();
+  expect(stats.promptTokens).toBeUndefined();
 });
 
 test('running a tool creates a tool message that is updated and sealed', async () => {
@@ -541,6 +622,8 @@ test('cancel seals the partial assistant text and appends an interrupt notice', 
     ),
   ).toBe(true);
 
+  // 中断也走 run_end 的状态刷新
+  expect(events.some(event => event.type === 'status_refresh')).toBe(true);
   expect(streamingFlags(events)).toEqual([true, false]);
 });
 
@@ -771,6 +854,7 @@ test('resume drops tool calls that have no matching tool result', () => {
 type ScriptTurn = {
   text?: string;
   thinking?: string;
+  usage?: Usage;
   toolCalls?: Array<{
     id: string;
     name: string;
@@ -799,6 +883,9 @@ class ScriptedModel implements ModelApi {
       stopReason: 'stop',
       timestamp: Date.now(),
     };
+    if (turn.usage !== undefined) {
+      output.usage = turn.usage;
+    }
 
     stream.push({ type: 'start', partial: output });
     let index = 0;

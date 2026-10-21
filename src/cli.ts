@@ -75,6 +75,7 @@ async function main(): Promise<void> {
       new AgentSession(createAgent(), sessionFile, createCompactConfig()),
     tools,
     catalog,
+    settings.statusBar,
   );
   tui.start();
 }

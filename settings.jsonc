@@ -1,4 +1,9 @@
 {
+  // 输入框上方的状态栏；style: default | nerdfont | powerline
+  "statusBar": {
+    "enable": true,
+    "style": "nerdfont"
+  },
   "providers": [
     {
       "name": "deepseek",

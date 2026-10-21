@@ -4,6 +4,7 @@ import { ModelCatalog } from '../../src/llm/model-catalog.ts';
 import type { Settings } from '../../src/setting-manager.ts';
 
 const settings: Settings = {
+  statusBar: { enable: true, style: 'default' },
   compactThreshold: 0.8,
   compactRetainRatio: 0.16,
   providers: [
@@ -45,6 +46,7 @@ test('select changes the current choice', () => {
 
 test('empty providers yield no choices and no current', () => {
   const catalog = new ModelCatalog({
+    statusBar: { enable: true, style: 'default' },
     compactThreshold: 0.8,
     compactRetainRatio: 0.16,
     providers: [],

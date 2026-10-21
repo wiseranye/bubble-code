@@ -12,6 +12,20 @@ const inputTypeSchema = z.enum(['text', 'image']);
 // 模型输入类型
 export type InputType = z.infer<typeof inputTypeSchema>;
 
+// 状态栏样式：default 纯文本、nerdfont 图标、powerline 图标 + 色块
+const statusBarStyleSchema = z.enum(['default', 'nerdfont', 'powerline']);
+
+export type StatusBarStyle = z.infer<typeof statusBarStyleSchema>;
+
+const statusBarConfigSchema = z
+  .strictObject({
+    enable: z.boolean().default(true),
+    style: statusBarStyleSchema.default('default'),
+  })
+  .default({ enable: true, style: 'default' });
+
+export type StatusBarConfig = z.infer<typeof statusBarConfigSchema>;
+
 // 思考档位：缺省 = 不传档，由模型默认行为决定
 const reasoningLevelSchema = z.enum([
   'minimal',
@@ -71,6 +85,8 @@ export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 const settingsSchema = z
   .strictObject({
     providers: z.array(providerConfigSchema).default([]),
+    // 输入框上方的状态栏；整段省略时使用默认值
+    statusBar: statusBarConfigSchema,
     // 上下文占用超过 contextWindow × compactThreshold 时触发自动压缩
     compactThreshold: z.number().min(0).max(1).default(0.8),
     // 压缩后完整保留的尾部消息预算，占 contextWindow 的比例
