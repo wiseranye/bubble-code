@@ -27,6 +27,7 @@ import {
   loadSessionFileEntries,
   type SessionFileEntry,
 } from '../agent/session-manager.ts';
+import type { ModelCatalog, ModelChoice } from '../llm/model-catalog.ts';
 import type { ToolRegistry } from '../tools/types.ts';
 import { LogoBanner } from './logo.ts';
 import {
@@ -34,6 +35,7 @@ import {
   createMessageView,
   type MessageView,
 } from './message-view.ts';
+import { ModelPicker } from './model-picker.ts';
 import { SessionPicker } from './session-picker.ts';
 import {
   matchSlashCommand,
@@ -52,6 +54,7 @@ export function createChatApp(
   tui: ViewportTUI,
   createSession: (sessionFile?: string) => AgentSession,
   tools: ToolRegistry,
+  catalog: ModelCatalog,
 ): void {
   // 转录文档：启动横幅 + 消息区。全屏模式下它挂在 ScrollView 里滚动，
   // /new、/resume 只清消息区，横幅不会被带走
@@ -225,6 +228,41 @@ export function createChatApp(
     });
   };
 
+  // /model：切换当前选中的模型。选中项是 app 级状态，/new、/resume 的新会话跟随
+  const switchModel = (choice: ModelChoice): void => {
+    catalog.select(choice);
+    session.setModel(catalog.createApi(choice), catalog.contextWindow(choice));
+    session.notify(
+      `已切换模型：${choice.provider.name}/${choice.model.name ?? choice.model.id}`,
+    );
+  };
+
+  // /model：弹出可选模型列表
+  const openModelPicker = (): void => {
+    let overlay: OverlayHandle | undefined;
+    const close = (): void => {
+      overlay?.hide();
+      overlay = undefined;
+    };
+    const picker = new ModelPicker(
+      catalog.choices,
+      catalog.current,
+      choice => {
+        close();
+        // 选中的就是当前模型：不重复切换，避免无谓的历史清洗
+        if (choice !== catalog.current) {
+          switchModel(choice);
+        }
+      },
+      close,
+    );
+    overlay = tui.showOverlay(picker, {
+      width: '70%',
+      maxHeight: 14,
+      anchor: 'center',
+    });
+  };
+
   // 斜杠命令的执行入口，UI 只负责分发到这里
   const runSlashCommand = (
     invocation: SlashCommandInvocation,
@@ -261,6 +299,23 @@ export function createChatApp(
         }
 
         void session.compact();
+        break;
+      }
+
+      case 'model': {
+        if (session.isStreaming || session.isCompacting) {
+          session.notify('请等待当前会话结束');
+          break;
+        }
+
+        if (catalog.choices.length === 0) {
+          session.notify(
+            '未配置模型，请先在 settings.jsonc 的 providers 中配置模型',
+          );
+          break;
+        }
+
+        openModelPicker();
         break;
       }
 

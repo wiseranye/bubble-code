@@ -1,4 +1,4 @@
-import type { AgentMessage, UserMessage } from '../llm/types.ts';
+import type { AgentMessage, ModelApi, UserMessage } from '../llm/types.ts';
 import type { Agent } from './agent.ts';
 import {
   buildSummarizationMessages,
@@ -66,8 +66,8 @@ export class AgentSession {
 
   private readonly sessionManager: SessionManager;
 
-  // 压缩配置与状态
-  private readonly compactConfig: CompactConfig;
+  // 压缩配置与状态；contextWindow 跟随 /model 切换
+  private compactConfig: CompactConfig;
   // 协议消息对象 → 会话文件条目 id：压缩条目的 firstRetainedEntryId 靠它定位。
   // 用对象身份做键（turn_end 事件里的消息和进 state 的是同一引用），
   // 不受 run 中途 state 与文件数量错位的影响
@@ -274,6 +274,28 @@ export class AgentSession {
     // 只中断本次 run / 压缩；和 agent 的订阅关系是长期的，不能动
     this.abortController?.abort();
     this.compactionController?.abort();
+  }
+
+  // /model 切换模型：替换 modelApi、compactConfig 的 contextWindow 跟随新模型。
+  // 只在非生成态调用（UI 层守卫），不存在 run 中途改历史的问题
+  setModel(modelApi: ModelApi, contextWindow: number): void {
+    // 无条件剥掉历史 thinking 块的回放签名：旧 provider 的签名回放给新 provider
+    // 必然无效（Anthropic 报 400 invalid signature）；剥掉后 pi 会把无签名
+    // thinking 转成纯文本回放，同 provider 切换也一样处理，代价可接受
+    for (const message of this.agent.state.messages) {
+      if (message.role !== 'assistant') {
+        continue;
+      }
+
+      for (const block of message.content) {
+        if (block.type === 'thinking') {
+          block.thinkingReplayData = undefined;
+        }
+      }
+    }
+
+    this.agent.state.modelApi = modelApi;
+    this.compactConfig = { ...this.compactConfig, contextWindow };
   }
 
   // 给用户的即时系统提示（比如命令不可用的原因），不发给模型

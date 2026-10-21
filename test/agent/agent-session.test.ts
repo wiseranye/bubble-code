@@ -954,3 +954,79 @@ class FailingModel implements ModelApi {
     return stream;
   }
 }
+
+function systemNotices(session: AgentSession): string[] {
+  return session.messages.flatMap(message =>
+    message.role === 'system' ? [message.content] : [],
+  );
+}
+
+test('setModel switches the model used by subsequent prompts', async () => {
+  const agent = new Agent({
+    modelApi: new ScriptedModel([{ text: '旧模型的回复' }]),
+    tools: new ToolRegistry(),
+  });
+  const session = openSession(agent);
+
+  session.prompt('第一句');
+  await until(() => !session.isStreaming);
+  expect(assistantMessages(session).at(-1)?.content).toContain('旧模型的回复');
+
+  session.setModel(new ScriptedModel([{ text: '新模型的回复' }]), 256_000);
+  session.prompt('第二句');
+  await until(() => !session.isStreaming);
+
+  expect(assistantMessages(session).at(-1)?.content).toContain('新模型的回复');
+});
+
+test('setModel strips thinking replay data from history but keeps the text', () => {
+  const agent = new Agent({
+    modelApi: new MockModel(0),
+    tools: new ToolRegistry(),
+  });
+  const session = openSession(agent);
+  const message: AssistantMessage = {
+    role: 'assistant',
+    content: [
+      { type: 'thinking', thinking: '想了一下', thinkingReplayData: 'sig-123' },
+      { type: 'text', text: '回复' },
+    ],
+    stopReason: 'stop',
+    timestamp: Date.now(),
+  };
+  agent.state.messages.push(message);
+
+  session.setModel(new MockModel(0), 256_000);
+
+  const thinking = message.content[0];
+  expect(thinking?.type === 'thinking' && thinking.thinkingReplayData).toBe(
+    undefined,
+  );
+  expect(thinking?.type === 'thinking' && thinking.thinking).toBe('想了一下');
+});
+
+test('setModel contextWindow applies to auto compaction on the next prompt', async () => {
+  // 默认配置的大窗口下第一轮不压缩；setModel 换成小窗口后第二轮触发自动压缩
+  const oldModel = new ScriptedModel([{ text: 'A'.repeat(4000) }]);
+  const agent = new Agent({ modelApi: oldModel, tools: new ToolRegistry() });
+  const session = openSession(agent);
+
+  session.prompt('第一句');
+  await until(() => !session.isStreaming);
+  expect(
+    systemNotices(session).some(content => content.includes('上下文已压缩')),
+  ).toBe(false);
+
+  // 摘要调用消耗新模型的第一轮剧本，正常回复消耗第二轮
+  session.setModel(
+    new ScriptedModel([{ text: '这是摘要。' }, { text: '完成。' }]),
+    1000,
+  );
+  session.prompt('第二句');
+  await until(() => !session.isStreaming);
+
+  expect(
+    systemNotices(session).some(content => content.includes('上下文已压缩')),
+  ).toBe(true);
+  expect(assistantMessages(session).at(-1)?.content).toContain('完成。');
+});
