@@ -31,3 +31,25 @@ _Avoid_: Finalized、Committed、Closed
 **Tool message（工具消息）**:
 一条记录单次工具调用的 Chat message：工具名、原始输入、执行输出与状态（running / done）。
 _Avoid_: Tool call（那是协议层的记录）
+
+**Context（上下文）**:
+一次请求发给模型的全部 Protocol message：system prompt、（如有）最近一次压缩的摘要、保留区间。
+_Avoid_: 消息历史、History
+
+**Session file（会话文件）**:
+会话的持久化记录：按时间追加的条目序列，恢复会话时重放以重建状态。
+_Avoid_: Log
+
+**Compaction（压缩）**:
+用模型对较早的 Protocol message 生成摘要、并以摘要替换 Context 前缀的过程，用于降低 token 占用。
+_Avoid_: Summarize（摘要只是产物，不是过程）
+
+**Summary（摘要）**:
+压缩的产物：一段替代被压缩消息的文本，作为 Context 前缀发送给模型。
+
+**Compaction entry（压缩条目）**:
+会话文件中记录一次压缩的条目：包含摘要文本，标识其之前的消息已被摘要取代。
+_Avoid_: Summary entry
+
+**Retained tail（保留区间）**:
+压缩后完整保留在 Context 末尾的消息区段，不参与摘要。

@@ -4,8 +4,12 @@ import { ProcessTerminal, TuiAltScreen } from '@earendil-works/pi-tui';
 import meow from 'meow';
 import { Agent } from './agent/agent.ts';
 import { AgentSession } from './agent/agent-session.ts';
+import {
+  type CompactConfig,
+  DEFAULT_COMPACT_CONFIG,
+} from './agent/compaction.ts';
 import { initRuntime } from './agent/runtime.ts';
-import { PiModelApi } from './llm/api/pi-model-api.ts';
+import { assembleModel, PiModelApi } from './llm/api/pi-model-api.ts';
 import {
   type ModelConfig,
   type ProviderConfig,
@@ -66,13 +70,22 @@ async function main(): Promise<void> {
           : new PiModelApi(found.provider, found.model),
       tools,
     });
+  // 压缩配置：contextWindow 取装配后模型的生效值（settings 覆盖 catalog，兜底 256k）
+  const compactConfig: CompactConfig = {
+    contextWindow:
+      found === undefined
+        ? DEFAULT_COMPACT_CONFIG.contextWindow
+        : assembleModel(found.provider, found.model).contextWindow,
+    threshold: settings.compactThreshold,
+    retainRatio: settings.compactRetainRatio,
+  };
   const terminal = new ProcessTerminal();
   // 全屏（备用屏）模式：转录区由视口自己滚动，工具消息的头部才能点开。
   // 鼠标是滚轮滚动和点击的前提，pi 默认开启，这里显式写出来
   const tui = new TuiAltScreen(terminal, undefined, undefined, { mouse: true });
   createChatApp(
     tui,
-    sessionFile => new AgentSession(createAgent(), sessionFile),
+    sessionFile => new AgentSession(createAgent(), sessionFile, compactConfig),
     tools,
   );
   tui.start();

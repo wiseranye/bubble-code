@@ -1,5 +1,15 @@
-import type { AgentMessage } from '../llm/types.ts';
+import type { AgentMessage, UserMessage } from '../llm/types.ts';
 import type { Agent } from './agent.ts';
+import {
+  buildSummarizationMessages,
+  type CompactConfig,
+  collectSummary,
+  DEFAULT_COMPACT_CONFIG,
+  estimateContextTokens,
+  findRetainedStart,
+  makeSummaryMessage,
+  projectSessionEntries,
+} from './compaction.ts';
 import { SessionManager, type SessionMessageEntry } from './session-manager.ts';
 import type { AgentEvent } from './types.ts';
 
@@ -30,7 +40,9 @@ export type AgentSessionEvent =
   | { type: 'message_added'; message: ChatMessage }
   | { type: 'message_updated'; message: ChatMessage }
   | { type: 'message_sealed'; message: ChatMessage }
-  | { type: 'streaming_changed'; isStreaming: boolean };
+  | { type: 'streaming_changed'; isStreaming: boolean }
+  // 压缩期间 UI 只禁用输入，不动 Bubbling 指示器（消息区有「压缩中」行）
+  | { type: 'compaction_changed'; isCompacting: boolean };
 
 type Listener = (event: AgentSessionEvent) => void;
 
@@ -54,8 +66,33 @@ export class AgentSession {
 
   private readonly sessionManager: SessionManager;
 
-  constructor(agent: Agent, sessionFile?: string) {
+  // 压缩配置与状态
+  private readonly compactConfig: CompactConfig;
+  // 协议消息对象 → 会话文件条目 id：压缩条目的 firstRetainedEntryId 靠它定位。
+  // 用对象身份做键（turn_end 事件里的消息和进 state 的是同一引用），
+  // 不受 run 中途 state 与文件数量错位的影响
+  private readonly entryIds = new WeakMap<AgentMessage, string>();
+  // 上一次压缩的摘要；undefined 表示还没压缩过
+  private previousSummary: string | undefined;
+  // 距上次压缩新增的消息数：手动压缩的「没有新消息」守卫
+  private messagesSinceCompaction = 0;
+  // 当前 run 新增的消息对象：循环内压缩时靠它把 newMessages 从 state 投影里剔出去
+  // （它们由 runAgentLoop 在 run 结束时统一 push 进 state）
+  private currentRunMessages = new Set<AgentMessage>();
+  // 自动压缩失败后停止重试，直到新一轮产生真实 usage
+  private autoCompactFailed = false;
+  private compacting = false;
+  private compactionController: AbortController | undefined;
+  // 压缩进行中插在消息区的临时行：结束时原地更新为结果文案（标记/失败/取消）
+  private compactionNotice: TextChatMessage | undefined;
+
+  constructor(
+    agent: Agent,
+    sessionFile?: string,
+    compactConfig: CompactConfig = DEFAULT_COMPACT_CONFIG,
+  ) {
     this.agent = agent;
+    this.compactConfig = compactConfig;
     this.unsubscribeAgent = agent.subscribe(event => {
       this.handleAgentEvent(event);
     });
@@ -72,81 +109,120 @@ export class AgentSession {
     }
   }
 
-  // 从会话文件恢复：协议历史还给 Agent（后续生成基于完整上下文），聊天记录重建到 store
+  // 从会话文件恢复：协议历史按压缩投影重建（摘要取代被压缩的前缀），
+  // 聊天记录重放全部条目——被摘要的消息在界面上仍然可见，压缩点插入标记
   private restoreSession(): void {
-    const messages = normalizeRestoredMessages(
-      this.sessionManager
-        .entries()
-        .filter(
-          (entry): entry is SessionMessageEntry => entry.type === 'message',
-        )
-        .map(entry => entry.message),
+    const projection = projectSessionEntries(this.sessionManager.entries());
+    this.previousSummary = projection.summary;
+    this.messagesSinceCompaction = projection.messagesSinceCompaction;
+
+    if (projection.summary !== undefined) {
+      this.agent.state.messages.push(makeSummaryMessage(projection.summary));
+    }
+
+    const normalized = normalizeRestoredPairs(
+      projection.contextEntries.map(entry => ({
+        id: entry.id,
+        message: entry.message,
+      })),
     );
+    for (const { id, message } of normalized) {
+      this.entryIds.set(message, id);
+      this.agent.state.messages.push(message);
+    }
 
-    this.agent.state.messages.push(...messages);
-
-    // tool_result 贴回对应的工具消息，键为 toolCallId
+    // tool_result 贴回对应的工具消息，键为 toolCallId。
+    // 转录重放同样走顺序修复（旧版本会把 tool_result 写在 assistant 之前），
+    // 以压缩标记为界分段整理，标记位置不动
     const toolMessages = new Map<string, ToolChatMessage>();
-    for (const message of messages) {
-      switch (message.role) {
-        case 'user': {
-          this.store.push({
-            id: this.idCounter++,
-            role: 'user',
-            content: message.content,
-          });
-          break;
-        }
+    let segment: SessionMessageEntry[] = [];
+    const flushSegment = (): void => {
+      const normalized = normalizeRestoredPairs(
+        segment.map(entry => ({ id: entry.id, message: entry.message })),
+      );
+      for (const { message } of normalized) {
+        this.appendRestoredMessage(message, toolMessages);
+      }
+      segment = [];
+    };
+    for (const item of projection.transcript) {
+      if (item.kind === 'compaction') {
+        flushSegment();
+        this.store.push({
+          id: this.idCounter++,
+          role: 'system',
+          content: compactionMarkerText(item.entry.summarizedCount),
+        });
+        continue;
+      }
 
-        case 'assistant': {
-          for (const block of message.content) {
-            if (block.type === 'text') {
-              this.store.push({
-                id: this.idCounter++,
-                role: 'assistant',
-                content: block.text,
-              });
-            } else if (block.type === 'thinking') {
-              this.store.push({
-                id: this.idCounter++,
-                role: 'thinking',
-                content: block.thinking,
-              });
-            } else {
-              // 恢复的会话不在执行中，工具消息直接是终态；成功与否没有持久化，按成功展示，
-              // 另外两个展示字段由后面的 tool_result 补上（output、metadata）
-              const toolMessage: ToolChatMessage = {
-                id: this.idCounter++,
-                role: 'tool',
-                toolCallId: block.id,
-                name: block.name,
-                input: JSON.stringify(block.input),
-                output: '',
-                status: 'done',
-                success: true,
-              };
-              toolMessages.set(block.id, toolMessage);
-              this.store.push(toolMessage);
-            }
+      segment.push(item.entry);
+    }
+    flushSegment();
+  }
+
+  private appendRestoredMessage(
+    message: AgentMessage,
+    toolMessages: Map<string, ToolChatMessage>,
+  ): void {
+    switch (message.role) {
+      case 'user': {
+        this.store.push({
+          id: this.idCounter++,
+          role: 'user',
+          content: message.content,
+        });
+        break;
+      }
+
+      case 'assistant': {
+        for (const block of message.content) {
+          if (block.type === 'text') {
+            this.store.push({
+              id: this.idCounter++,
+              role: 'assistant',
+              content: block.text,
+            });
+          } else if (block.type === 'thinking') {
+            this.store.push({
+              id: this.idCounter++,
+              role: 'thinking',
+              content: block.thinking,
+            });
+          } else {
+            // 恢复的会话不在执行中，工具消息直接是终态；成功与否没有持久化，按成功展示，
+            // 另外两个展示字段由后面的 tool_result 补上（output、metadata）
+            const toolMessage: ToolChatMessage = {
+              id: this.idCounter++,
+              role: 'tool',
+              toolCallId: block.id,
+              name: block.name,
+              input: JSON.stringify(block.input),
+              output: '',
+              status: 'done',
+              success: true,
+            };
+            toolMessages.set(block.id, toolMessage);
+            this.store.push(toolMessage);
           }
-          break;
         }
+        break;
+      }
 
-        case 'tool_result': {
-          const toolMessage = toolMessages.get(message.toolCallId);
-          if (toolMessage !== undefined) {
-            toolMessage.output = message.output;
-            // metadata 里有 diff 这类展示数据，丢了就只剩无行号的兜底渲染
-            if (message.metadata !== undefined) {
-              toolMessage.metadata = message.metadata;
-            }
+      case 'tool_result': {
+        const toolMessage = toolMessages.get(message.toolCallId);
+        if (toolMessage !== undefined) {
+          toolMessage.output = message.output;
+          // metadata 里有 diff 这类展示数据，丢了就只剩无行号的兜底渲染
+          if (message.metadata !== undefined) {
+            toolMessage.metadata = message.metadata;
           }
-          break;
         }
+        break;
+      }
 
-        default: {
-          break;
-        }
+      default: {
+        break;
       }
     }
   }
@@ -159,6 +235,10 @@ export class AgentSession {
     return this.generating;
   }
 
+  get isCompacting(): boolean {
+    return this.compacting;
+  }
+
   subscribe(listener: Listener): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -166,7 +246,7 @@ export class AgentSession {
 
   prompt(text: string): void {
     const content = text.trim();
-    if (content === '' || this.generating) {
+    if (content === '' || this.generating || this.compacting) {
       return;
     }
 
@@ -191,8 +271,9 @@ export class AgentSession {
   }
 
   cancel(): void {
-    // 只中断本次 run；和 agent 的订阅关系是长期的，不能动
+    // 只中断本次 run / 压缩；和 agent 的订阅关系是长期的，不能动
     this.abortController?.abort();
+    this.compactionController?.abort();
   }
 
   // 给用户的即时系统提示（比如命令不可用的原因），不发给模型
@@ -211,13 +292,24 @@ export class AgentSession {
     content: string,
     controller: AbortController,
   ): Promise<void> {
-    this.sessionManager.appendMessage({
+    // 用户消息由这里构造、落盘、登记条目 id，再传给 agent：
+    // 循环内压缩的保留切点可能落在它上面，必须是已登记的同一个对象
+    const userMessage: UserMessage = {
       role: 'user',
       content: content,
       timestamp: Date.now(),
-    });
+    };
+    const userEntryId = this.sessionManager.appendMessage(userMessage);
+    this.entryIds.set(userMessage, userEntryId);
+    this.messagesSinceCompaction++;
+    this.currentRunMessages = new Set([userMessage]);
     try {
-      await this.agent.prompt(content, { signal: controller.signal });
+      await this.agent.prompt(userMessage, {
+        signal: controller.signal,
+        // 每个 turn 的请求前检查点：超阈值就地在循环内压缩
+        beforeRequest: messages =>
+          this.compactBeforeRequest(messages, controller.signal),
+      });
     } catch (error: unknown) {
       // 正常失败都走 run_end 事件；这里是 agent 层直接抛错的兜底
       if (this.generating && !controller.signal.aborted) {
@@ -225,10 +317,159 @@ export class AgentSession {
         this.appendText('assistant', `\n\n[生成出错] ${detail}`);
       }
     } finally {
+      this.currentRunMessages = new Set();
       // 收不到 run_end（比如 emit 抛错）时兜底收口，streaming 标志必须配对
       if (this.generating) {
         this.finishRun();
       }
+    }
+  }
+
+  // 手动压缩（/compact）：忽略阈值，但受守卫限制
+  async compact(): Promise<void> {
+    if (this.generating || this.compacting) {
+      this.notify('请等待当前会话结束');
+      return;
+    }
+    if (this.agent.state.modelApi === undefined) {
+      this.notify('未配置模型，无法压缩上下文');
+      return;
+    }
+    if (
+      this.previousSummary !== undefined &&
+      this.messagesSinceCompaction === 0
+    ) {
+      this.notify('会话已压缩过，没有新的消息需要压缩');
+      return;
+    }
+
+    await this.compactInternal('manual');
+  }
+
+  // agent-loop 的请求前检查点：每个 turn 的 stream 之前测量，超阈值就地在循环内压缩。
+  // 返回原数组引用表示没有变动；压缩成功返回替换后的完整消息列表
+  private async compactBeforeRequest(
+    messages: AgentMessage[],
+    signal: AbortSignal,
+  ): Promise<AgentMessage[]> {
+    if (this.compacting || this.autoCompactFailed) {
+      return messages;
+    }
+    if (this.agent.state.modelApi === undefined) {
+      return messages;
+    }
+    const { contextWindow, threshold } = this.compactConfig;
+    if (estimateContextTokens(messages) <= threshold * contextWindow) {
+      return messages;
+    }
+
+    const projected = await this.compactInternal('auto', signal, messages);
+    return projected ?? messages;
+  }
+
+  // 压缩主流程：摘要侧信道成功后才动历史；失败/取消时历史原样保留。
+  // 返回替换后的完整消息列表；没有发生压缩（含守卫拒绝与失败）时返回 undefined
+  private async compactInternal(
+    mode: 'auto' | 'manual',
+    runSignal?: AbortSignal,
+    messages: AgentMessage[] = this.agent.state.messages,
+  ): Promise<AgentMessage[] | undefined> {
+    const modelApi = this.agent.state.modelApi;
+    if (modelApi === undefined) {
+      return undefined;
+    }
+
+    // 有旧摘要时它是 messages[1]，本身不进可摘要区间（摘要文本单独喂给侧信道）
+    const minIndex = this.previousSummary !== undefined ? 2 : 1;
+    const retainBudget =
+      this.compactConfig.retainRatio * this.compactConfig.contextWindow;
+    let retainedStart = findRetainedStart(messages, retainBudget, minIndex);
+    if (retainedStart <= minIndex && mode === 'manual') {
+      // 手动压缩没有长度守卫：保留预算装不下时回退为只保留最后一轮
+      // （摘要到最后一条 user 消息为止；user 不是 tool_result，无需配对调整）
+      retainedStart = lastUserIndex(messages, minIndex);
+    }
+
+    if (retainedStart <= minIndex) {
+      // 可摘要区间为空（比如会话只有 system + 一条 user）：静默返回
+      return undefined;
+    }
+
+    const firstRetained = messages[retainedStart];
+    const firstRetainedEntryId =
+      firstRetained === undefined
+        ? undefined
+        : this.entryIds.get(firstRetained);
+    if (firstRetainedEntryId === undefined) {
+      // 映射缺失属内部异常：不动历史
+      if (mode === 'manual') {
+        this.notify('上下文压缩失败：内部状态缺失');
+      } else {
+        this.autoCompactFailed = true;
+      }
+      return undefined;
+    }
+
+    const summarized = messages.slice(minIndex, retainedStart);
+    const sideChannel = buildSummarizationMessages(
+      this.previousSummary,
+      summarized,
+    );
+
+    const controller = new AbortController();
+    this.compacting = true;
+    this.compactionController = controller;
+    // run 内的自动压缩跟随 run 的取消（Esc）
+    const abortWithRun = () => controller.abort();
+    runSignal?.addEventListener('abort', abortWithRun, { once: true });
+    this.handleAgentEvent({ type: 'compaction_start' });
+    try {
+      const summary = await collectSummary(
+        modelApi,
+        sideChannel,
+        controller.signal,
+      );
+
+      this.sessionManager.appendCompaction({
+        summary,
+        summarizedCount: summarized.length,
+        firstRetainedEntryId,
+      });
+      this.previousSummary = summary;
+      const systemPrompt = messages[0];
+      const projected: AgentMessage[] = [
+        ...(systemPrompt === undefined ? [] : [systemPrompt]),
+        makeSummaryMessage(summary),
+        ...messages.slice(retainedStart),
+      ];
+      // state 只接收投影中属于原 state 的部分；当前 run 新增的消息
+      // 由 runAgentLoop 在 run 结束时统一 push，提前进 state 会重复
+      this.agent.state.messages = projected.filter(
+        message => !this.currentRunMessages.has(message),
+      );
+      this.messagesSinceCompaction = 0;
+      this.handleAgentEvent({
+        type: 'compaction_end',
+        summarizedCount: summarized.length,
+      });
+      return projected;
+    } catch (error: unknown) {
+      // 失败/取消：历史不动、不写压缩条目；自动压缩停止重试直到产生新 usage
+      if (mode === 'auto') {
+        this.autoCompactFailed = true;
+      }
+      if (controller.signal.aborted) {
+        this.sealCompactionNotice('── 上下文压缩已取消 ──');
+      } else {
+        const detail = error instanceof Error ? error.message : String(error);
+        this.sealCompactionNotice(`── 上下文压缩失败：${detail} ──`);
+      }
+      return undefined;
+    } finally {
+      runSignal?.removeEventListener('abort', abortWithRun);
+      this.compacting = false;
+      this.compactionController = undefined;
+      this.emit({ type: 'compaction_changed', isCompacting: false });
     }
   }
 
@@ -295,11 +536,24 @@ export class AgentSession {
         // 持久化顺序必须是 assistant 在前、它的工具结果在后；反过来
         // resume 之后发给 API 会被拒绝（tool 消息前面没有带 tool_calls 的 assistant）
         if (event.message) {
-          this.sessionManager.appendMessage(event.message);
+          const entryId = this.sessionManager.appendMessage(event.message);
+          this.entryIds.set(event.message, entryId);
+          this.messagesSinceCompaction++;
+          this.currentRunMessages.add(event.message);
+          // 新一轮真实 usage 落地，自动压缩的失败状态解除
+          if (
+            event.message.role === 'assistant' &&
+            event.message.usage !== undefined
+          ) {
+            this.autoCompactFailed = false;
+          }
         }
 
         for (const toolResult of event.toolResults) {
-          this.sessionManager.appendMessage(toolResult);
+          const entryId = this.sessionManager.appendMessage(toolResult);
+          this.entryIds.set(toolResult, entryId);
+          this.messagesSinceCompaction++;
+          this.currentRunMessages.add(toolResult);
         }
 
         break;
@@ -319,6 +573,26 @@ export class AgentSession {
           this.appendSystemMessage('[已中断] 用户按 ESC 取消了本次生成');
         }
 
+        break;
+      }
+
+      case 'compaction_start': {
+        // 消息区插一行「压缩中」，结束时原地更新为结果文案
+        const notice: TextChatMessage = {
+          id: this.idCounter++,
+          role: 'system',
+          content: '── 正在压缩上下文 … ──',
+        };
+        this.compactionNotice = notice;
+        this.store.push(notice);
+        this.emit({ type: 'message_added', message: notice });
+        this.emit({ type: 'compaction_changed', isCompacting: true });
+        break;
+      }
+
+      case 'compaction_end': {
+        // 临时行原地更新为永久标记；恢复时标记由压缩条目重建
+        this.sealCompactionNotice(compactionMarkerText(event.summarizedCount));
         break;
       }
 
@@ -360,6 +634,24 @@ export class AgentSession {
     this.store.push(message);
     this.emit({ type: 'message_added', message });
     this.emit({ type: 'message_sealed', message });
+  }
+
+  // 把「压缩中」临时行原地更新为最终文案并冻结；行不存在（异常路径）时补发一条
+  private sealCompactionNotice(content: string): void {
+    const notice = this.compactionNotice;
+    this.compactionNotice = undefined;
+    if (notice === undefined) {
+      this.appendSystemMessage(content);
+      return;
+    }
+
+    const updated = this.update(notice.id, message => ({
+      ...message,
+      content,
+    }));
+    if (updated !== undefined) {
+      this.emit({ type: 'message_sealed', message: updated });
+    }
   }
 
   // 流式文本按段累积：第一个增量创建消息，之后的增量原地追加；
@@ -422,13 +714,35 @@ export class AgentSession {
   }
 }
 
+function compactionMarkerText(summarizedCount: number): string {
+  return `── 上下文已压缩：前 ${summarizedCount} 条消息已摘要 ──`;
+}
+
+// 手动压缩的回退切点：最后一条 user 消息的下标（摘要到它为止，只保留最后一轮）。
+// 找不到（或它在可摘要下界上，区间为空调用方处理）时返回 minIndex
+function lastUserIndex(
+  messages: readonly AgentMessage[],
+  minIndex: number,
+): number {
+  for (let index = messages.length - 1; index > minIndex; index--) {
+    if (messages[index]?.role === 'user') {
+      return index;
+    }
+  }
+  return minIndex;
+}
+
+// 恢复用的消息对：条目 id 随消息走，压缩要引用保留区间第一条的条目 id
+type RestoredPair = { id: string; message: AgentMessage };
+
 // 恢复会话文件时把消息序列整理成 API 接受的形态：
 // 1. 旧版本把 tool_result 写在 assistant 之前（持久化顺序 bug），挪回正确顺序
 // 2. 中断等原因留下的孤儿工具调用（assistant 有 tool_calls 但没有对应
 //    tool_result）原样发给 API 也会 400，剥掉；剥完没有内容的空 assistant 一并丢弃
-function normalizeRestoredMessages(messages: AgentMessage[]): AgentMessage[] {
-  const reordered: AgentMessage[] = [];
-  for (const message of messages) {
+function normalizeRestoredPairs(pairs: RestoredPair[]): RestoredPair[] {
+  const reordered: RestoredPair[] = [];
+  for (const pair of pairs) {
+    const message = pair.message;
     if (message.role === 'assistant') {
       const toolCallIds = new Set(
         message.content.flatMap(block =>
@@ -439,7 +753,7 @@ function normalizeRestoredMessages(messages: AgentMessage[]): AgentMessage[] {
         // 末尾紧邻的、属于这条 assistant 的 tool_result 挪到它后面
         let runStart = reordered.length;
         while (runStart > 0) {
-          const previous = reordered[runStart - 1];
+          const previous = reordered[runStart - 1]?.message;
           if (
             previous?.role === 'tool_result' &&
             toolCallIds.has(previous.toolCallId)
@@ -452,18 +766,18 @@ function normalizeRestoredMessages(messages: AgentMessage[]): AgentMessage[] {
 
         if (runStart < reordered.length) {
           const moved = reordered.splice(runStart);
-          reordered.push(message, ...moved);
+          reordered.push(pair, ...moved);
           continue;
         }
       }
     }
 
-    reordered.push(message);
+    reordered.push(pair);
   }
 
   // 每个 tool_call 必须有对应的 tool_result，反之亦然
   const claimedIds = new Set<string>();
-  for (const message of reordered) {
+  for (const { message } of reordered) {
     if (message.role === 'assistant') {
       for (const block of message.content) {
         if (block.type === 'tool_call') {
@@ -474,17 +788,18 @@ function normalizeRestoredMessages(messages: AgentMessage[]): AgentMessage[] {
   }
 
   const answeredIds = new Set<string>();
-  for (const message of reordered) {
+  for (const { message } of reordered) {
     if (message.role === 'tool_result' && claimedIds.has(message.toolCallId)) {
       answeredIds.add(message.toolCallId);
     }
   }
 
-  const result: AgentMessage[] = [];
-  for (const message of reordered) {
+  const result: RestoredPair[] = [];
+  for (const pair of reordered) {
+    const message = pair.message;
     if (message.role === 'tool_result') {
       if (claimedIds.has(message.toolCallId)) {
-        result.push(message);
+        result.push(pair);
       }
 
       continue;
@@ -500,13 +815,13 @@ function normalizeRestoredMessages(messages: AgentMessage[]): AgentMessage[] {
 
       result.push(
         content.length === message.content.length
-          ? message
-          : { ...message, content },
+          ? pair
+          : { id: pair.id, message: { ...message, content } },
       );
       continue;
     }
 
-    result.push(message);
+    result.push(pair);
   }
 
   return result;

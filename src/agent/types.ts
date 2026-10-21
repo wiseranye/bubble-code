@@ -37,7 +37,10 @@ export type AgentEvent =
       toolCallId: string;
       result: ToolResultMessage;
       success: boolean;
-    };
+    }
+  // 压缩生命周期：压缩由 AgentSession 驱动，事件经 handleAgentEvent 统一到 UI
+  | { type: 'compaction_start' }
+  | { type: 'compaction_end'; summarizedCount: number };
 
 export type AgentContext = {
   // 工具注册中心

@@ -37,7 +37,19 @@ export interface SessionMessageEntry extends BaseSessionEntry {
   message: AgentMessage;
 }
 
-export type SessionEntry = SessionMeta | SessionMessageEntry;
+// 压缩条目：追加在文件尾部，标记一次已完成的压缩。
+// firstRetainedEntryId 指向保留区间的第一条消息条目，恢复时据此重建上下文
+export interface SessionCompactionEntry extends BaseSessionEntry {
+  type: 'compaction';
+  summary: string;
+  summarizedCount: number;
+  firstRetainedEntryId: string;
+}
+
+export type SessionEntry =
+  | SessionMeta
+  | SessionMessageEntry
+  | SessionCompactionEntry;
 
 export interface SessionFileEntry {
   id: string;
@@ -256,13 +268,41 @@ export class SessionManager {
     return entry.type === 'metadata';
   }
 
-  appendMessage(message: AgentMessage) {
+  // 返回分配的条目 id：压缩需要引用保留区间第一条消息的条目 id
+  appendMessage(message: AgentMessage): string {
     const entry: SessionMessageEntry = {
       type: 'message',
       message: message,
       id: uuidv7(),
       timestamp: Date.now(),
     };
+    this._enqueue(entry);
+    return entry.id;
+  }
+
+  // 压缩条目只记录压缩结果，摘要调用本身不进会话文件
+  appendCompaction({
+    summary,
+    summarizedCount,
+    firstRetainedEntryId,
+  }: {
+    summary: string;
+    summarizedCount: number;
+    firstRetainedEntryId: string;
+  }): string {
+    const entry: SessionCompactionEntry = {
+      type: 'compaction',
+      summary,
+      summarizedCount,
+      firstRetainedEntryId,
+      id: uuidv7(),
+      timestamp: Date.now(),
+    };
+    this._enqueue(entry);
+    return entry.id;
+  }
+
+  private _enqueue(entry: SessionEntry): void {
     // 把这次写入挂到链尾：前一个写完才轮到它
     this._writeQueue = this._writeQueue
       .then(() => this._appendEntry(entry))

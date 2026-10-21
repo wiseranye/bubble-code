@@ -71,6 +71,10 @@ export type ProviderConfig = z.infer<typeof providerConfigSchema>;
 const settingsSchema = z
   .strictObject({
     providers: z.array(providerConfigSchema).default([]),
+    // 上下文占用超过 contextWindow × compactThreshold 时触发自动压缩
+    compactThreshold: z.number().min(0).max(1).default(0.8),
+    // 压缩后完整保留的尾部消息预算，占 contextWindow 的比例
+    compactRetainRatio: z.number().min(0).max(1).default(0.16),
   })
   .superRefine((settings, ctx) => {
     const seen = new Set<string>();

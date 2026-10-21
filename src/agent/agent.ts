@@ -1,8 +1,8 @@
 // 有状态门面
 
-import type { ModelApi } from '../llm/types.ts';
+import type { ModelApi, UserMessage } from '../llm/types.ts';
 import type { ToolRegistry } from '../tools/types.ts';
-import { runAgentLoop } from './agent-loop.ts';
+import { type BeforeRequestHook, runAgentLoop } from './agent-loop.ts';
 import { buildSystemPrompt } from './system-prompt.ts';
 import type { AgentContext, AgentEvent, AgentState } from './types.ts';
 
@@ -44,8 +44,11 @@ export class Agent {
   }
 
   async prompt(
-    input: string,
-    { signal }: { signal?: AbortSignal } = {},
+    input: UserMessage,
+    {
+      signal,
+      beforeRequest,
+    }: { signal?: AbortSignal; beforeRequest?: BeforeRequestHook } = {},
   ): Promise<void> {
     if (!this._state.modelApi) {
       // 配置问题不是生成失败，直接抛出，不走 run_end 事件
@@ -63,6 +66,7 @@ export class Agent {
       async event => this._onEvent(event, signal),
       this._state.modelApi,
       signal,
+      { beforeRequest },
     );
 
     this._state.messages.push(...newMessages);

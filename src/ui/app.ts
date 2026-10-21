@@ -81,8 +81,11 @@ export function createChatApp(
     }
   };
 
+  let streaming = false;
+  let compacting = false;
   const setStreaming = (isStreaming: boolean): void => {
-    editor.disableSubmit = isStreaming;
+    streaming = isStreaming;
+    editor.disableSubmit = streaming || compacting;
     if (isStreaming) {
       if (indicator === undefined) {
         indicator = new BubblingIndicator(() => tui.requestRender());
@@ -111,7 +114,7 @@ export function createChatApp(
     }
 
     if (matchesKey(data, Key.escape)) {
-      if (session.isStreaming) {
+      if (session.isStreaming || session.isCompacting) {
         session.cancel();
       } else {
         editor.setText('');
@@ -142,6 +145,13 @@ export function createChatApp(
 
       case 'streaming_changed': {
         setStreaming(event.isStreaming);
+        break;
+      }
+
+      case 'compaction_changed': {
+        // 压缩不碰 Bubbling 指示器（消息区有「压缩中」行），只禁用输入
+        compacting = event.isCompacting;
+        editor.disableSubmit = streaming || compacting;
         break;
       }
 
@@ -241,6 +251,16 @@ export function createChatApp(
         }
 
         openSessionPicker();
+        break;
+      }
+
+      case 'compact': {
+        if (session.isStreaming) {
+          session.notify('请等待当前会话结束');
+          break;
+        }
+
+        void session.compact();
         break;
       }
 

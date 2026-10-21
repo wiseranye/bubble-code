@@ -4,18 +4,27 @@ import type {
   ModelApi,
   ToolCall,
   ToolResultMessage,
+  UserMessage,
 } from '../llm/types.ts';
 import type { AgentContext, AgentEvent } from './types.ts';
 
-// biome-ignore lint/complexity/noBannedTypes: 预留
-export type AgentLoopOptions = {};
+// 每次请求模型之前的检查点（AgentSession 用它做循环内压缩）。
+// 返回替换后的完整消息列表；原样返回入参（同一引用）表示没有变动
+export type BeforeRequestHook = (
+  messages: AgentMessage[],
+) => Promise<AgentMessage[]>;
+
+export type AgentLoopOptions = {
+  beforeRequest?: BeforeRequestHook;
+};
 
 // 事件发射器
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
 
 export async function runAgentLoop(
-  // 本次运行的增量输入，暂时只支持文本输入，后期再考虑图片/文件引用。
-  prompt: string,
+  // 本次运行的增量输入，由调用方构造并持久化（压缩要引用它的条目 id），
+  // 暂时只支持文本输入，后期再考虑图片/文件引用。
+  prompt: UserMessage,
   context: AgentContext,
   emit: AgentEventSink,
   modelApi: ModelApi,
@@ -23,13 +32,7 @@ export async function runAgentLoop(
   options?: AgentLoopOptions,
 ): Promise<AgentMessage[]> {
   // 本次运行新增消息
-  const newMessages: AgentMessage[] = [
-    {
-      role: 'user',
-      content: prompt,
-      timestamp: Date.now(),
-    },
-  ];
+  const newMessages: AgentMessage[] = [prompt];
 
   // 本轮运行时上下文
   const runContext: AgentContext = {
@@ -50,7 +53,7 @@ export async function runAgentLoop(
 // 返回本次运行新增的消息
 async function runLoop(
   context: AgentContext,
-  _options: AgentLoopOptions,
+  options: AgentLoopOptions,
   emit: AgentEventSink,
   signal: AbortSignal | undefined,
   modelApi: ModelApi,
@@ -66,6 +69,28 @@ async function runLoop(
     // 上一步刚被取消就别再发起请求了
     if (signal?.aborted) {
       break;
+    }
+
+    // 每个 turn 的请求前检查点：循环内压缩在这里发生（ADR 0004）。
+    // 压缩会缩短消息列表：context.messages 原地替换，newMessages 剔除被摘要的前缀，
+    // 免得 run 结束时 state.messages.push(...newMessages) 把已摘要的消息再推一遍
+    if (options.beforeRequest !== undefined) {
+      // eslint-disable-next-line no-await-in-loop -- 请求前的串行检查点
+      const projected = await options.beforeRequest(context.messages);
+      if (projected !== context.messages) {
+        const retained = new Set(projected);
+        context.messages.splice(0, context.messages.length, ...projected);
+        newMessages.splice(
+          0,
+          newMessages.length,
+          ...newMessages.filter(message => retained.has(message)),
+        );
+      }
+
+      // 压缩期间按 Esc 取消的是整个 run
+      if (signal?.aborted) {
+        break;
+      }
     }
 
     // eslint-disable-next-line no-await-in-loop -- 事件必须按顺序发出
