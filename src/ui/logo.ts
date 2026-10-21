@@ -1,6 +1,6 @@
-import { readFileSync } from 'node:fs';
 import type { Component } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import { readVersion } from '../utils/version.ts';
 import { style } from './theme.ts';
 
 // 像素点阵：# 是一个像素，统一 6 行高。
@@ -113,28 +113,6 @@ function renderHints(pairs: Array<[string, string]>): string {
         `${style.prompt(key)}${style.dim(` ${description}`)}`,
     )
     .join(style.dim(' · '));
-}
-
-function readVersion(): string | undefined {
-  try {
-    const raw = readFileSync(
-      new URL('../../package.json', import.meta.url),
-      'utf8',
-    );
-    const parsed: unknown = JSON.parse(raw);
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      'version' in parsed &&
-      typeof parsed.version === 'string'
-    ) {
-      return parsed.version;
-    }
-  } catch {
-    // 读不到就不显示版本号
-  }
-
-  return undefined;
 }
 
 const logoRows = renderPixelRows(composePixelRows());

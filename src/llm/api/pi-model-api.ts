@@ -19,6 +19,7 @@ import { builtinModels } from '@earendil-works/pi-ai/providers/all';
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript';
 import type { ModelConfig, ProviderConfig } from '../../setting-manager.ts';
 import type { AnyTool } from '../../tools/types.ts';
+import { readVersion } from '../../utils/version.ts';
 import { toolResultContent } from '../tool-result.ts';
 import {
   type AssistantMessage,
@@ -66,6 +67,11 @@ export function findCatalogModel(
   return provider?.getModels().find(candidate => candidate.id === modelId);
 }
 
+// 请求的 User-Agent：覆盖 pi 的默认值（"pi (platform ...)"），让 provider
+// 控制台里的来源显示为 bubble-cli。pi 的三个协议都把 model.headers 排在默认
+// UA 之后合并，这里的值会生效
+const USER_AGENT = `bubble-cli/${readVersion() ?? 'dev'}`;
+
 // 把 settings 里的 provider/model 装配成 pi 的 Model：catalog 命中则以 catalog 条目为基础
 // （保留 cost、compat 等元数据），settings 显式写的字段覆盖；未命中则手工合成兜底值
 export function assembleModel(
@@ -101,6 +107,8 @@ export function assembleModel(
     contextWindow: modelConfig.contextWindow ?? base.contextWindow,
     // 配了思考档位即视为声明思考能力；没配跟随 catalog，catalog 没有则为 false
     reasoning: modelConfig.reasoning !== undefined ? true : base.reasoning,
+    // catalog 自带的 headers（如有）保留，User-Agent 固定覆盖
+    headers: { ...base.headers, 'User-Agent': USER_AGENT },
   };
 }
 
