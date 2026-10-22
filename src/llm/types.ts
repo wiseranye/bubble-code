@@ -69,6 +69,9 @@ export type UserMessage = {
 export type SystemPrompt = {
   role: 'system';
   content: string;
+  // 节名 → 内容指纹：刷新系统提示词时的对比基线。
+  // 老版本会话文件里的系统消息没有此字段，恢复后视为无基线
+  sections?: Record<string, string>;
 };
 
 export type ToolResultMessage = {

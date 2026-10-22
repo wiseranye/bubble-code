@@ -6,17 +6,92 @@ import type {
   ToolResultMessage,
   UserMessage,
 } from '../llm/types.ts';
+import { projectSendView } from './send-view.ts';
 import type { AgentContext, AgentEvent } from './types.ts';
 
-// 每次请求模型之前的检查点（AgentSession 用它做循环内压缩）。
-// 返回替换后的完整消息列表；原样返回入参（同一引用）表示没有变动
-export type BeforeRequestHook = (
-  messages: AgentMessage[],
-) => Promise<AgentMessage[]>;
+// run / turn 生命周期钩子。prepareRun 在每次 run 开始、用户消息进入历史之前触发；
+// prepareTurn 在每次模型请求之前触发（系统提示词刷新、循环内压缩都挂在这里）。
+// 同一时机的钩子按注册顺序串行执行；单个钩子抛错只记日志，不中断 run
+export interface AgentLoopHookContext {
+  // run = prepareRun（写入 state 消息列表）；turn = prepareTurn（写入 run 的活动列表与增量）
+  readonly phase: 'run' | 'turn';
+  readonly signal: AbortSignal | undefined;
+  // 当前生效的消息列表；用 appendMessage / replaceMessages 修改，不要直接改数组
+  readonly messages: readonly AgentMessage[];
+  // 追加一条消息：turn 阶段同时进入 run 增量，run 结束时并入 state
+  appendMessage(message: AgentMessage): void;
+  // 原地替换消息列表；turn 阶段会把 run 增量中不在替换结果里的消息一并剔除
+  replaceMessages(projected: AgentMessage[]): void;
+}
+
+export interface AgentLoopHook {
+  prepareRun?(context: AgentLoopHookContext): Promise<void> | void;
+  prepareTurn?(context: AgentLoopHookContext): Promise<void> | void;
+}
 
 export type AgentLoopOptions = {
-  beforeRequest?: BeforeRequestHook;
+  hooks?: readonly AgentLoopHook[];
 };
+
+// 依次触发钩子；单个钩子失败只警告，不影响后续钩子与本次 run
+export async function fireAgentLoopHooks(
+  hooks: readonly AgentLoopHook[],
+  method: 'prepareRun' | 'prepareTurn',
+  context: AgentLoopHookContext,
+): Promise<void> {
+  for (const hook of hooks) {
+    try {
+      await hook[method]?.(context);
+    } catch (error: unknown) {
+      console.error(`agent 钩子 ${method} 执行失败:`, error);
+    }
+  }
+}
+
+// prepareRun 的上下文：直接读写 state 消息列表
+export function stateHookContext(
+  messages: AgentMessage[],
+  signal: AbortSignal | undefined,
+): AgentLoopHookContext {
+  return {
+    phase: 'run',
+    signal,
+    messages,
+    appendMessage(message) {
+      messages.push(message);
+    },
+    replaceMessages(projected) {
+      messages.splice(0, messages.length, ...projected);
+    },
+  };
+}
+
+// prepareTurn 的上下文：写入 run 的活动列表与增量
+function runHookContext(
+  messages: AgentMessage[],
+  newMessages: AgentMessage[],
+  signal: AbortSignal | undefined,
+): AgentLoopHookContext {
+  return {
+    phase: 'turn',
+    signal,
+    messages,
+    appendMessage(message) {
+      messages.push(message);
+      newMessages.push(message);
+    },
+    replaceMessages(projected) {
+      messages.splice(0, messages.length, ...projected);
+      const retained = new Set(projected);
+      for (let index = newMessages.length - 1; index >= 0; index--) {
+        const message = newMessages[index];
+        if (message !== undefined && !retained.has(message)) {
+          newMessages.splice(index, 1);
+        }
+      }
+    },
+  };
+}
 
 // 事件发射器
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
@@ -64,6 +139,9 @@ async function runLoop(
     tools: context.tools.list(),
     signal,
   };
+  const hooks = options.hooks ?? [];
+  // 钩子写操作的落点：run 的活动消息列表与增量
+  const hookContext = runHookContext(context.messages, newMessages, signal);
   await emit({ type: 'run_start' });
   while (true) {
     // 上一步刚被取消就别再发起请求了
@@ -71,23 +149,13 @@ async function runLoop(
       break;
     }
 
-    // 每个 turn 的请求前检查点：循环内压缩在这里发生（ADR 0004）。
-    // 压缩会缩短消息列表：context.messages 原地替换，newMessages 剔除被摘要的前缀，
-    // 免得 run 结束时 state.messages.push(...newMessages) 把已摘要的消息再推一遍
-    if (options.beforeRequest !== undefined) {
+    // 每个 turn 的请求前检查点：系统提示词刷新、循环内压缩都在这里
+    // （压缩见 ADR 0004，钩子机制见 ADR 0005）
+    if (hooks.length > 0) {
       // eslint-disable-next-line no-await-in-loop -- 请求前的串行检查点
-      const projected = await options.beforeRequest(context.messages);
-      if (projected !== context.messages) {
-        const retained = new Set(projected);
-        context.messages.splice(0, context.messages.length, ...projected);
-        newMessages.splice(
-          0,
-          newMessages.length,
-          ...newMessages.filter(message => retained.has(message)),
-        );
-      }
+      await fireAgentLoopHooks(hooks, 'prepareTurn', hookContext);
 
-      // 压缩期间按 Esc 取消的是整个 run
+      // 钩子执行期间按 Esc 取消的是整个 run
       if (signal?.aborted) {
         break;
       }
@@ -100,10 +168,11 @@ async function runLoop(
     let message: AssistantMessage | undefined;
     // 本轮待执行的工具调用列表
     const waitingToolCalls: ToolCall[] = [];
+    // 发送视图：存储列表里可能有多条系统消息，只发最后一条并移到开头（ADR 0005）。
     // 模型输出必须顺序消费，不能并发拉取。
     // eslint-disable-next-line no-await-in-loop
     for await (const event of modelApi.stream(
-      context.messages,
+      projectSendView(context.messages),
       streamOptions,
     )) {
       switch (event.type) {

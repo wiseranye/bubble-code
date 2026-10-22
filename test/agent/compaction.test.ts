@@ -426,20 +426,21 @@ test('compaction entry is persisted and resume rebuilds the projected context', 
       ),
   ).toBe(true);
 
-  // 恢复：上下文 = system + 摘要 + 保留区间；转录区重建压缩标记
+  // 恢复：上下文 = 摘要 + 系统消息（被压缩切点排除，由投影重新纳入充当刷新基线）
+  // + 保留区间；转录区重建压缩标记
   const resumedAgent = new Agent({
     modelApi: new ScriptedModel([]),
     tools: echoRegistry(),
   });
   const resumedSession = openSession(resumedAgent, filePath, tinyCompactConfig);
   expect(resumedAgent.state.messages.map(message => message.role)).toEqual([
-    'system',
     'user',
+    'system',
     'assistant',
     'tool_result',
     'assistant',
   ]);
-  const resumedSummary = resumedAgent.state.messages[1];
+  const resumedSummary = resumedAgent.state.messages[0];
   expect(
     resumedSummary?.role === 'user' &&
       resumedSummary.content === `${SUMMARY_PREFIX}这是摘要。`,
@@ -557,10 +558,12 @@ test('auto compaction fires inside the tool loop before the next stream when ove
     entry => entry.type === 'compaction',
   );
   expect(compactionIndex).toBeGreaterThan(-1);
+  // 首个 run 的系统消息条目在文件最前（prepareRun 刷新产生并落盘）
   const rolesBefore = entries
     .slice(0, compactionIndex)
     .flatMap(entry => (entry.type === 'message' ? [entry.message.role] : []));
   expect(rolesBefore).toEqual([
+    'system',
     'user',
     'assistant',
     'tool_result',
@@ -632,15 +635,15 @@ test('resume with one compaction entry projects summary plus retained tail', () 
   const agent = new Agent({ tools: new ToolRegistry() });
   const session = openSession(agent, filePath);
 
-  // 上下文 = system + 摘要 + 保留区间（e3 起）+ 压缩后新增（e5）
+  // 上下文 = 摘要 + 保留区间（e3 起）+ 压缩后新增（e5）；
+  // 手写的老格式文件没有系统消息条目
   expect(agent.state.messages.map(message => message.role)).toEqual([
-    'system',
     'user',
     'user',
     'assistant',
     'user',
   ]);
-  const summary = agent.state.messages[1];
+  const summary = agent.state.messages[0];
   expect(
     summary?.role === 'user' && summary.content === `${SUMMARY_PREFIX}摘要一`,
   ).toBe(true);
@@ -688,14 +691,13 @@ test('resume with two compaction entries uses only the last one for context', ()
   const agent = new Agent({ tools: new ToolRegistry() });
   const session = openSession(agent, filePath);
 
-  // 上下文 = system + 摘要二 + 保留区间（e3 起）+ 压缩后新增（e4）
+  // 上下文 = 摘要二 + 保留区间（e3 起）+ 压缩后新增（e4）
   expect(agent.state.messages.map(message => message.role)).toEqual([
-    'system',
     'user',
     'assistant',
     'user',
   ]);
-  const summary = agent.state.messages[1];
+  const summary = agent.state.messages[0];
   expect(
     summary?.role === 'user' && summary.content === `${SUMMARY_PREFIX}摘要二`,
   ).toBe(true);
@@ -729,7 +731,6 @@ test('resume ignores a compaction entry whose retained id is missing', () => {
 
   // 损坏的压缩条目被忽略：全部消息保留，没有摘要消息
   expect(agent.state.messages.map(message => message.role)).toEqual([
-    'system',
     'user',
     'assistant',
     'user',

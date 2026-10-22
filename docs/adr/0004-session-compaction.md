@@ -1,6 +1,6 @@
 # ADR-004: 会话压缩：追加压缩条目到会话文件，恢复时按条目投影上下文
 
-- **Status:** Accepted
+- **Status:** Accepted（`beforeRequest` 检查点机制已由 ADR 0005 的钩子机制取代）
 - **Date:** 2026-10-21
 
 ## 背景

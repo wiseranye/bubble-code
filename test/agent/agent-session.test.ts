@@ -275,7 +275,8 @@ test('contextStats has no cache data before the first response', () => {
   );
   const stats = session.contextStats;
 
-  expect(stats.usedTokens).toBeGreaterThan(0);
+  // 首个 run 之前还没有任何协议消息：系统消息在 prepareRun 刷新时才产生
+  expect(stats.usedTokens).toBe(0);
   expect(stats.contextWindow).toBe(256_000);
   expect(stats.cacheRead).toBeUndefined();
   expect(stats.cacheWrite).toBeUndefined();
@@ -530,8 +531,9 @@ test('a session file without error and metadata fields still loads', () => {
     });
     const session = openSession(agent, filePath);
 
+    // 老格式会话文件没有系统消息条目：恢复后历史里没有系统消息，
+    // 第一条系统消息由首个 run 的刷新钩子追加
     expect(agent.state.messages.map(message => message.role)).toEqual([
-      'system',
       'user',
       'assistant',
       'tool_result',
@@ -778,8 +780,9 @@ test('resuming a session with tool_result before its assistant message repairs t
     const session = openSession(agent, filePath);
 
     // 恢复后发给模型的消息：assistant 必须在它的 tool_result 之前
+    // （老格式会话没有系统消息条目，首个 run 的刷新钩子才会追加）
     const roles = agent.state.messages.map(message => message.role);
-    expect(roles).toEqual(['system', 'user', 'assistant', 'tool_result']);
+    expect(roles).toEqual(['user', 'assistant', 'tool_result']);
 
     // 工具结果也要能贴回 UI 上的工具消息
     const tool = session.messages.find(message => message.role === 'tool');

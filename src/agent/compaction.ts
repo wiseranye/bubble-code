@@ -188,7 +188,8 @@ export type TranscriptItem =
 export interface ResumeProjection {
   // 上一次压缩的摘要；没有有效压缩条目时为 undefined
   summary: string | undefined;
-  // 进入协议历史的消息条目（不含 system prompt 与摘要消息，由调用方补）
+  // 进入协议历史的消息条目（摘要消息由调用方补；文件中最后一条系统消息
+  // 若被压缩切点排除在外，由本投影重新纳入，充当刷新基线）
   contextEntries: SessionMessageEntry[];
   // 转录区重建素材：全量消息 + 压缩标记，被摘要的消息在界面上仍然可见
   transcript: TranscriptItem[];
@@ -197,6 +198,7 @@ export interface ResumeProjection {
 }
 
 // 恢复投影：以最后一条压缩条目为准，上下文 = 摘要 + 保留区间 + 压缩后新增的消息；
+// 文件里最后一条系统消息不在其中时也补入（刷新基线）。
 // firstRetainedEntryId 找不到（文件损坏）时忽略该压缩条目，保留全部消息
 export function projectSessionEntries(
   entries: readonly SessionEntry[],
@@ -252,13 +254,35 @@ export function projectSessionEntries(
   const afterCompaction = positioned.filter(
     item => item.position > lastCompaction.position,
   );
+  const contextEntries = [
+    ...segment.slice(retainedIndex).map(item => item.entry),
+    ...afterCompaction.map(item => item.entry),
+  ];
+  // 系统消息是提示词血统，不是对话内容：文件里最后一条系统消息必须始终在
+  // 上下文中充当刷新基线，否则恢复后无基线，首个 run 会重复追加一条相同的系统消息
+  if (!contextEntries.some(entry => entry.message.role === 'system')) {
+    const lastSystem = lastSystemEntry(positioned);
+    if (lastSystem !== undefined) {
+      contextEntries.unshift(lastSystem);
+    }
+  }
   return {
     summary: lastCompaction.entry.summary,
-    contextEntries: [
-      ...segment.slice(retainedIndex).map(item => item.entry),
-      ...afterCompaction.map(item => item.entry),
-    ],
+    contextEntries,
     transcript,
     messagesSinceCompaction: afterCompaction.length,
   };
+}
+
+// 按文件位置排列的最后一条系统消息条目
+function lastSystemEntry(
+  positioned: readonly { entry: SessionMessageEntry; position: number }[],
+): SessionMessageEntry | undefined {
+  for (let index = positioned.length - 1; index >= 0; index--) {
+    const item = positioned[index];
+    if (item?.entry.message.role === 'system') {
+      return item.entry;
+    }
+  }
+  return undefined;
 }

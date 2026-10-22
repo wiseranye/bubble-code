@@ -1,10 +1,12 @@
 import type {
   AgentMessage,
   ModelApi,
+  SystemPrompt,
   Usage,
   UserMessage,
 } from '../llm/types.ts';
-import type { Agent } from './agent.ts';
+import { type Agent, UNCONFIGURED_MODEL_MESSAGE } from './agent.ts';
+import type { AgentLoopHookContext } from './agent-loop.ts';
 import {
   buildSummarizationMessages,
   type CompactConfig,
@@ -15,6 +17,7 @@ import {
   makeSummaryMessage,
   projectSessionEntries,
 } from './compaction.ts';
+import { projectSendView } from './send-view.ts';
 import { SessionManager, type SessionMessageEntry } from './session-manager.ts';
 import type { AgentEvent } from './types.ts';
 
@@ -89,6 +92,8 @@ export class AgentSession {
   private readonly entryIds = new WeakMap<AgentMessage, string>();
   // 上一次压缩的摘要；undefined 表示还没压缩过
   private previousSummary: string | undefined;
+  // 投影里的摘要消息对象：可摘要区间靠引用排除它（消息可能不在列表开头）
+  private summaryMessage: AgentMessage | undefined;
   // 距上次压缩新增的消息数：手动压缩的「没有新消息」守卫
   private messagesSinceCompaction = 0;
   // 当前 run 新增的消息对象：循环内压缩时靠它把 newMessages 从 state 投影里剔出去
@@ -113,6 +118,14 @@ export class AgentSession {
     this.unsubscribeAgent = agent.subscribe(event => {
       this.handleAgentEvent(event);
     });
+    // 内置钩子按此顺序执行：压缩要看到刷新后的消息列表
+    agent.registerHook({
+      prepareRun: context => this.refreshSystemPrompt(context),
+      prepareTurn: context => this.refreshSystemPrompt(context),
+    });
+    agent.registerHook({
+      prepareTurn: context => this.compactBeforeRequest(context),
+    });
     this.sessionManager = new SessionManager(process.cwd(), sessionFile);
     if (sessionFile === undefined) {
       // 欢迎语在 UI 订阅之前就存在，启动时直接补建视图
@@ -134,7 +147,9 @@ export class AgentSession {
     this.messagesSinceCompaction = projection.messagesSinceCompaction;
 
     if (projection.summary !== undefined) {
-      this.agent.state.messages.push(makeSummaryMessage(projection.summary));
+      const summaryMessage = makeSummaryMessage(projection.summary);
+      this.summaryMessage = summaryMessage;
+      this.agent.state.messages.push(summaryMessage);
     }
 
     const normalized = normalizeRestoredPairs(
@@ -285,7 +300,7 @@ export class AgentSession {
     }
 
     return {
-      usedTokens: estimateContextTokens(messages),
+      usedTokens: estimateContextTokens(projectSendView(messages)),
       contextWindow: this.compactConfig.contextWindow,
       cacheRead: usage?.cacheRead,
       cacheWrite: usage?.cacheWrite,
@@ -372,24 +387,27 @@ export class AgentSession {
     content: string,
     controller: AbortController,
   ): Promise<void> {
-    // 用户消息由这里构造、落盘、登记条目 id，再传给 agent：
-    // 循环内压缩的保留切点可能落在它上面，必须是已登记的同一个对象
-    const userMessage: UserMessage = {
-      role: 'user',
-      content: content,
-      timestamp: Date.now(),
-    };
-    const userEntryId = this.sessionManager.appendMessage(userMessage);
-    this.entryIds.set(userMessage, userEntryId);
-    this.messagesSinceCompaction++;
-    this.currentRunMessages = new Set([userMessage]);
-    this.currentRunOrder = [userMessage];
     try {
+      // 未配置模型：不落盘、不触发钩子，直接走到出错提示（与 agent.prompt 的校验一致）
+      if (this.agent.state.modelApi === undefined) {
+        throw new Error(UNCONFIGURED_MODEL_MESSAGE);
+      }
+      // 用户消息由这里构造、落盘、登记条目 id，再传给 agent：
+      // 循环内压缩的保留切点可能落在它上面，必须是已登记的同一个对象
+      const userMessage: UserMessage = {
+        role: 'user',
+        content: content,
+        timestamp: Date.now(),
+      };
+      // prepareRun 在用户消息落盘之前触发：刷新产生的系统消息在生产顺序上排在它前面
+      await this.agent.prepareRun(controller.signal);
+      const userEntryId = this.sessionManager.appendMessage(userMessage);
+      this.entryIds.set(userMessage, userEntryId);
+      this.messagesSinceCompaction++;
+      this.currentRunMessages = new Set([userMessage]);
+      this.currentRunOrder = [userMessage];
       await this.agent.prompt(userMessage, {
         signal: controller.signal,
-        // 每个 turn 的请求前检查点：超阈值就地在循环内压缩
-        beforeRequest: messages =>
-          this.compactBeforeRequest(messages, controller.signal),
       });
     } catch (error: unknown) {
       // 正常失败都走 run_end 事件；这里是 agent 层直接抛错的兜底
@@ -428,25 +446,64 @@ export class AgentSession {
     await this.compactInternal('manual');
   }
 
-  // agent-loop 的请求前检查点：每个 turn 的 stream 之前测量，超阈值就地在循环内压缩。
-  // 返回原数组引用表示没有变动；压缩成功返回替换后的完整消息列表
-  private async compactBeforeRequest(
-    messages: AgentMessage[],
-    signal: AbortSignal,
-  ): Promise<AgentMessage[]> {
-    if (this.compacting || this.autoCompactFailed) {
-      return messages;
-    }
-    if (this.agent.state.modelApi === undefined) {
-      return messages;
-    }
-    const { contextWindow, threshold } = this.compactConfig;
-    if (estimateContextTokens(messages) <= threshold * contextWindow) {
-      return messages;
+  // 系统提示词刷新（内置钩子）：重新装配后与最后一条系统消息逐节对比指纹；
+  // 有变化或无基线（如恢复的老会话）时，追加一条完整的新系统消息并立即落盘。
+  // 内存与会话文件都按生产顺序追加；发给模型时由发送视图把最后一条系统消息移到开头
+  private refreshSystemPrompt(context: AgentLoopHookContext): void {
+    const built = this.agent.systemPrompt.build();
+    const baseline = lastSystemMessage(context.messages);
+    if (
+      baseline !== undefined &&
+      baseline.sections !== undefined &&
+      sectionsEqual(baseline.sections, built.sections)
+    ) {
+      return;
     }
 
-    const projected = await this.compactInternal('auto', signal, messages);
-    return projected ?? messages;
+    const message: SystemPrompt = {
+      role: 'system',
+      content: built.content,
+      sections: built.sections,
+    };
+    context.appendMessage(message);
+    const entryId = this.sessionManager.appendMessage(message);
+    this.entryIds.set(message, entryId);
+    if (context.phase === 'turn') {
+      // run 中途产生的消息和 user/assistant 一样登记：
+      // 压缩的 state 过滤与状态栏的用量统计都靠这两份记录
+      this.currentRunMessages.add(message);
+      this.currentRunOrder.push(message);
+    }
+  }
+
+  // prepareTurn 检查点：每个 turn 的 stream 之前测量（系统提示词刷新先于本钩子执行），
+  // 超阈值就地在循环内压缩
+  private async compactBeforeRequest(
+    context: AgentLoopHookContext,
+  ): Promise<void> {
+    if (this.compacting || this.autoCompactFailed) {
+      return;
+    }
+    if (this.agent.state.modelApi === undefined) {
+      return;
+    }
+    const { contextWindow, threshold } = this.compactConfig;
+    // 估算口径与实际发送一致：只算发送视图（最后一条系统消息 + 其余消息）
+    if (
+      estimateContextTokens(projectSendView(context.messages)) <=
+      threshold * contextWindow
+    ) {
+      return;
+    }
+
+    const projected = await this.compactInternal(
+      'auto',
+      context.signal,
+      context.messages,
+    );
+    if (projected !== undefined) {
+      context.replaceMessages(projected);
+    }
   }
 
   // 压缩主流程：摘要侧信道成功后才动历史；失败/取消时历史原样保留。
@@ -454,30 +511,33 @@ export class AgentSession {
   private async compactInternal(
     mode: 'auto' | 'manual',
     runSignal?: AbortSignal,
-    messages: AgentMessage[] = this.agent.state.messages,
+    messages: readonly AgentMessage[] = this.agent.state.messages,
   ): Promise<AgentMessage[] | undefined> {
     const modelApi = this.agent.state.modelApi;
     if (modelApi === undefined) {
       return undefined;
     }
 
-    // 有旧摘要时它是 messages[1]，本身不进可摘要区间（摘要文本单独喂给侧信道）
-    const minIndex = this.previousSummary !== undefined ? 2 : 1;
+    // 系统消息与旧摘要不进可摘要区间：系统消息由刷新机制维护，
+    // 投影只保留最新一条；旧摘要的文本单独喂给摘要侧信道
+    const pool = messages.filter(
+      message => message.role !== 'system' && message !== this.summaryMessage,
+    );
     const retainBudget =
       this.compactConfig.retainRatio * this.compactConfig.contextWindow;
-    let retainedStart = findRetainedStart(messages, retainBudget, minIndex);
-    if (retainedStart <= minIndex && mode === 'manual') {
+    let retainedStart = findRetainedStart(pool, retainBudget, 0);
+    if (retainedStart <= 0 && mode === 'manual') {
       // 手动压缩没有长度守卫：保留预算装不下时回退为只保留最后一轮
       // （摘要到最后一条 user 消息为止；user 不是 tool_result，无需配对调整）
-      retainedStart = lastUserIndex(messages, minIndex);
+      retainedStart = lastUserIndex(pool, 0);
     }
 
-    if (retainedStart <= minIndex) {
-      // 可摘要区间为空（比如会话只有 system + 一条 user）：静默返回
+    if (retainedStart <= 0) {
+      // 可摘要区间为空（比如会话只有一条 user）：静默返回
       return undefined;
     }
 
-    const firstRetained = messages[retainedStart];
+    const firstRetained = pool[retainedStart];
     const firstRetainedEntryId =
       firstRetained === undefined
         ? undefined
@@ -492,7 +552,7 @@ export class AgentSession {
       return undefined;
     }
 
-    const summarized = messages.slice(minIndex, retainedStart);
+    const summarized = pool.slice(0, retainedStart);
     const sideChannel = buildSummarizationMessages(
       this.previousSummary,
       summarized,
@@ -518,16 +578,26 @@ export class AgentSession {
         firstRetainedEntryId,
       });
       this.previousSummary = summary;
-      const systemPrompt = messages[0];
+      const summaryMessage = makeSummaryMessage(summary);
+      this.summaryMessage = summaryMessage;
+      // 投影只保留最新的系统消息；旧的系统消息不进投影，
+      // 会话文件里仍按生产顺序保留原文
+      const latestSystem = lastSystemMessage(messages);
       const projected: AgentMessage[] = [
-        ...(systemPrompt === undefined ? [] : [systemPrompt]),
-        makeSummaryMessage(summary),
-        ...messages.slice(retainedStart),
+        ...(latestSystem === undefined ? [] : [latestSystem]),
+        summaryMessage,
+        ...pool.slice(retainedStart),
       ];
       // state 只接收投影中属于原 state 的部分；当前 run 新增的消息
       // 由 runAgentLoop 在 run 结束时统一 push，提前进 state 会重复
       this.agent.state.messages = projected.filter(
         message => !this.currentRunMessages.has(message),
+      );
+      // 状态栏在 run 结束前用 currentRunOrder 补全 state；
+      // 被摘要掉的本轮消息要从里面剔除，否则用量虚高
+      const projectedMessages = new Set(projected);
+      this.currentRunOrder = this.currentRunOrder.filter(message =>
+        projectedMessages.has(message),
       );
       this.messagesSinceCompaction = 0;
       this.handleAgentEvent({
@@ -805,6 +875,29 @@ export class AgentSession {
       listener(event);
     }
   }
+}
+
+// 最后一条系统消息：刷新对比的基线、压缩投影保留的对象
+function lastSystemMessage(
+  messages: readonly AgentMessage[],
+): SystemPrompt | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index];
+    if (message?.role === 'system') {
+      return message;
+    }
+  }
+  return undefined;
+}
+
+// 逐节对比指纹：节的数量或任一节的指纹不同都视为已变化
+function sectionsEqual(
+  a: Record<string, string>,
+  b: Record<string, string>,
+): boolean {
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  return aKeys.length === bKeys.length && aKeys.every(key => a[key] === b[key]);
 }
 
 function compactionMarkerText(summarizedCount: number): string {

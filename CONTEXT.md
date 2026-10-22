@@ -53,3 +53,19 @@ _Avoid_: Summary entry
 
 **Retained tail（保留区间）**:
 压缩后完整保留在 Context 末尾的消息区段，不参与摘要。
+
+**System prompt（系统提示词）**:
+role 为 system 的 Protocol message，指导模型行为。一个会话里可按生产顺序存在多条：Refresh 在内容变化时追加新的一条。
+_Avoid_: 系统提示（那是 Transcript 里展示层的 system Chat message）
+
+**Section（提示词节）**:
+系统提示词的组成单位，各自独立生成与检测变化。
+_Avoid_: Paragraph、Block
+
+**Refresh（刷新）**:
+在 run 开始与每次模型请求之前重新装配系统提示词的过程；内容变化时向协议历史追加一条新的系统提示词。
+_Avoid_: Reload、Rebuild
+
+**Send view（发送视图）**:
+协议历史发往模型前的投影：只含最后一条系统提示词并置于开头，其余消息保持原序。
+_Avoid_: Projection（压缩恢复用的是另一套投影）
