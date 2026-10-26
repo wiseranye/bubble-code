@@ -1,6 +1,7 @@
 import type {
   AgentMessage,
   ModelApi,
+  SkillActivation,
   SystemPrompt,
   Usage,
   UserMessage,
@@ -19,6 +20,7 @@ import {
 } from './compaction.ts';
 import { projectSendView } from './send-view.ts';
 import { SessionManager, type SessionMessageEntry } from './session-manager.ts';
+import type { Skill } from './skills.ts';
 import type { AgentEvent } from './types.ts';
 
 // UI 消息模型：和协议消息（AgentMessage）分离，带 id 和渲染状态
@@ -26,6 +28,8 @@ export type TextChatMessage = {
   id: number;
   role: 'system' | 'user' | 'assistant' | 'thinking';
   content: string;
+  // 手动 Skill 激活的结构化元数据；恢复时从 Protocol message.extra 带回。
+  skillActivation?: SkillActivation;
 };
 
 export type ToolChatMessage = {
@@ -137,6 +141,14 @@ export class AgentSession {
     } else {
       this.restoreSession();
     }
+
+    const skillWarnings = agent.skillSnapshot.warnings;
+    if (skillWarnings.length > 0) {
+      // 只进 Transcript，不进协议历史或会话文件；同一次扫描聚合为一条通知。
+      this.appendSystemMessage(
+        `Skill 加载警告：\n${skillWarnings.map(warning => `- ${warning}`).join('\n')}`,
+      );
+    }
   }
 
   // 从会话文件恢复：协议历史按压缩投影重建（摘要取代被压缩的前缀），
@@ -203,6 +215,9 @@ export class AgentSession {
           id: this.idCounter++,
           role: 'user',
           content: message.content,
+          ...(message.extra?.skillActivation === undefined
+            ? {}
+            : { skillActivation: message.extra.skillActivation }),
         });
         break;
       }
@@ -269,6 +284,10 @@ export class AgentSession {
     return this.store;
   }
 
+  get skills(): readonly Skill[] {
+    return this.agent.skillSnapshot.skills;
+  }
+
   get isStreaming(): boolean {
     return this.generating;
   }
@@ -316,7 +335,7 @@ export class AgentSession {
     return () => this.listeners.delete(listener);
   }
 
-  prompt(text: string): void {
+  prompt(text: string, skillActivation?: SkillActivation): void {
     const content = text.trim();
     if (content === '' || this.generating || this.compacting) {
       return;
@@ -326,6 +345,7 @@ export class AgentSession {
       id: this.idCounter++,
       role: 'user',
       content,
+      ...(skillActivation === undefined ? {} : { skillActivation }),
     };
     this.store.push(userMessage);
     this.emit({ type: 'message_added', message: userMessage });
@@ -340,7 +360,7 @@ export class AgentSession {
 
     const controller = new AbortController();
     this.abortController = controller;
-    void this.run(content, controller);
+    void this.run(content, controller, skillActivation);
   }
 
   cancel(): void {
@@ -386,6 +406,7 @@ export class AgentSession {
   private async run(
     content: string,
     controller: AbortController,
+    skillActivation?: SkillActivation,
   ): Promise<void> {
     try {
       // 未配置模型：不落盘、不触发钩子，直接走到出错提示（与 agent.prompt 的校验一致）
@@ -398,6 +419,9 @@ export class AgentSession {
         role: 'user',
         content: content,
         timestamp: Date.now(),
+        ...(skillActivation === undefined
+          ? {}
+          : { extra: { skillActivation } }),
       };
       // prepareRun 在用户消息落盘之前触发：刷新产生的系统消息在生产顺序上排在它前面
       await this.agent.prepareRun(controller.signal);

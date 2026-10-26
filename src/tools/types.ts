@@ -18,8 +18,9 @@ export type ToolRenderState =
       metadata?: Record<string, unknown>;
     };
 
-// 工具渲染器：summarise 把参数压成一行，renderBody 按状态渲染正文
+// 工具渲染器：displayName 替换特殊记录的标题，summarise 把参数压成一行，renderBody 渲染正文
 export interface ToolRenderer {
+  displayName?(input: unknown): string;
   summarise?(input: unknown): string;
   renderBody?(
     state: ToolRenderState,

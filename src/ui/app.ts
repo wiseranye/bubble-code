@@ -42,11 +42,11 @@ import {
 import { ModelPicker } from './model-picker.ts';
 import { SessionPicker } from './session-picker.ts';
 import {
-  matchSlashCommand,
   SlashCommandAutocomplete,
   type SlashCommandInvocation,
   slashCommandArgumentPlaceholder,
   slashCommandTakesArgument,
+  submitSlashCommand,
 } from './slash-command.ts';
 import { StatusBar, type StatusBarData } from './status-bar.ts';
 import { editorTheme, style } from './theme.ts';
@@ -339,7 +339,7 @@ export function createChatApp(
     });
   };
 
-  // 斜杠命令的执行入口，UI 只负责分发到这里
+  // 内置斜杠命令的执行入口；Skill 激活由 submitSlashCommand 处理
   const runSlashCommand = (
     invocation: SlashCommandInvocation,
     text: string,
@@ -411,25 +411,18 @@ export function createChatApp(
   };
 
   const editor = new PromptEditor(tui, editorTheme, { paddingX: 2 });
-  editor.setAutocompleteProvider(new SlashCommandAutocomplete());
+  editor.setAutocompleteProvider(
+    new SlashCommandAutocomplete(() => session.skills),
+  );
   editor.onSubmit = text => {
-    const invocation = matchSlashCommand(text);
-    if (invocation !== undefined) {
-      // 带参数的命令只输了命令名：不发送，补成 "/name " 留在输入框里，
-      // 参数占位提示由 PromptEditor 渲染，用户接着输入参数
-      if (
-        invocation.command.argumentHint !== undefined &&
-        invocation.argument === ''
-      ) {
-        editor.setText(`/${invocation.command.name} `);
-        return;
-      }
-
-      runSlashCommand(invocation, text);
-      return;
-    }
-
-    session.prompt(text);
+    submitSlashCommand(text, {
+      skills: session.skills,
+      busy: session.isStreaming || session.isCompacting,
+      restore: value => editor.setText(value),
+      notify: content => session.notify(content),
+      prompt: (content, activation) => session.prompt(content, activation),
+      runCommand: runSlashCommand,
+    });
   };
 
   editor.disableSubmit = session.isStreaming;

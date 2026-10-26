@@ -16,6 +16,23 @@
 - `Enter` 发送、`Shift+Enter`（部分终端为 `Alt+Enter`）换行、`Ctrl+C` 退出
 - 滚轮、`PgUp`/`PgDn`、`Home`/`End` 滚动转录视口，`Ctrl+Shift+F` 搜索
 
+## Skills
+
+新建或恢复会话时，按以下优先级扫描 Skill；同名时只暴露高优先级来源：
+
+```text
+<cwd>/.bubble/skills
+<cwd>/.agents/skills
+$BUBBLE_HOME/skills
+~/.agents/skills
+```
+
+- 支持嵌套发现；一个目录包含 `SKILL.md` 后，不再扫描其子目录。
+- 只校验 `name` 和 `description`：缺失或空白时跳过，长度或名称规范问题警告但仍加载；不校验其他可选字段。
+- 会话运行期间复用同一份 Skill 快照，不在每轮请求前重新扫描。
+- 输入 `/skill:` 可补全并手动加载 Skill；补全选择后可输入额外描述，也可直接发送。
+- 模型读取或用户手动加载 Skill 时，界面显示可点击展开的 `skill` 记录。
+
 ## 安装与运行
 
 需要 Node.js >= 22.19，以及交互式终端（TTY）。

@@ -168,8 +168,13 @@ function parseTitleLine(line: string): string | undefined {
   }
 
   if (entry.type === 'message' && entry.message.role === 'user') {
+    const activation = entry.message.extra?.skillActivation;
+    const content =
+      activation === undefined
+        ? entry.message.content
+        : `/skill:${activation.name}${activation.additionalDescription.trim() === '' ? '' : ` ${activation.additionalDescription}`}`;
     // 压成单行，过长截断
-    const oneLine = entry.message.content.replace(/\s+/g, ' ').trim();
+    const oneLine = content.replace(/\s+/g, ' ').trim();
     return oneLine.length > maxTitleLength
       ? `${oneLine.slice(0, maxTitleLength)}…`
       : oneLine;

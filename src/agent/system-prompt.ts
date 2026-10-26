@@ -1,6 +1,6 @@
 // 系统提示词按节装配：每节一个 provider，刷新时逐节对比指纹决定是否追加新的系统消息。
 // 'construction' 节在装配器生命周期内只求值一次（比如 project_context 读盘）；
-// 'per-refresh' 节每次装配都重新求值（工具列表、未来的 MCP / Skill 节）
+// 'per-refresh' 节每次装配都重新求值（工具列表、未来的 MCP 节）；Skill 节只格式化预加载快照
 
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';

@@ -36,6 +36,18 @@ _Avoid_: Tool call（那是协议层的记录）
 一次请求发给模型的全部 Protocol message：system prompt、（如有）最近一次压缩的摘要、保留区间。
 _Avoid_: 消息历史、History
 
+**Skill**:
+可按需加入 Context 的命名任务指令集合，以 `SKILL.md` 为入口，通过名称和描述供模型或用户选择。
+_Avoid_: Plugin、Tool
+
+**Skill snapshot（Skill 快照）**:
+会话建立时确定的可用 Skill 集合；同一会话期间保持不变。
+_Avoid_: Live skills、Skill registry
+
+**Skill activation（Skill 加载）**:
+将某个 Skill 的正文加入 Context 的一次动作，可由模型自主选择或用户明确选择。
+_Avoid_: Skill installation、Skill discovery
+
 **Session file（会话文件）**:
 会话的持久化记录：按时间追加的条目序列，恢复会话时重放以重建状态。
 _Avoid_: Log

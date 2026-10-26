@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest';
-import { readRenderer } from '../../src/tools/read.render.ts';
+import { isSkillReadInput, readRenderer } from '../../src/tools/read.render.ts';
 
 function summarise(input: unknown): string | undefined {
   return readRenderer.summarise?.(input);
@@ -29,4 +29,13 @@ test('read summary falls back to a JSON-ish line when the input does not parse',
 test('read summary collapses a single string value and truncates extra lines', () => {
   expect(summarise('第一行\n第二行')).toBe('第一行 …');
   expect(summarise({ note: '第一行\n第二行' })).toBe('第一行 …');
+});
+
+test('only an exact SKILL.md basename selects skill rendering', () => {
+  expect(isSkillReadInput({ filePath: 'SKILL.md' })).toBe(true);
+  expect(isSkillReadInput({ filePath: '/tmp/a/SKILL.md' })).toBe(true);
+  expect(isSkillReadInput({ filePath: 'C:\\a\\SKILL.md' })).toBe(true);
+  expect(isSkillReadInput({ filePath: '/tmp/a/skill.md' })).toBe(false);
+  expect(isSkillReadInput({ filePath: '/tmp/a/SKILL.md.bak' })).toBe(false);
+  expect(isSkillReadInput({ filePath: '/tmp/a/not-SKILL.md' })).toBe(false);
 });

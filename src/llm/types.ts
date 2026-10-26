@@ -60,10 +60,19 @@ export type AssistantMessage = {
   errorMessage?: string;
 };
 
+export type SkillActivation = {
+  readonly name: string;
+  readonly location: string;
+  readonly body: string;
+  readonly additionalDescription: string;
+};
+
 export type UserMessage = {
   role: 'user';
   content: string;
   timestamp: number; // Unix timestamp in milliseconds
+  // 结构化激活信息只用于 Transcript、恢复与标题；provider 适配层不发送它。
+  extra?: { skillActivation?: SkillActivation };
 };
 
 export type SystemPrompt = {

@@ -8,12 +8,14 @@ import {
   runAgentLoop,
   stateHookContext,
 } from './agent-loop.ts';
+import { formatAvailableSkills, type SkillSnapshot } from './skills.ts';
 import { SystemPromptAssembler } from './system-prompt.ts';
 import type { AgentContext, AgentEvent, AgentState } from './types.ts';
 
 export interface AgentOptions {
   modelApi?: ModelApi;
   tools: ToolRegistry;
+  skillSnapshot?: SkillSnapshot;
 }
 
 // 未配置模型时的提示：Agent.prompt 抛出，AgentSession 在落盘与触发钩子之前先做同样检查
@@ -30,21 +32,36 @@ export class Agent {
   // 系统消息不随构造写入历史：每次 run / 请求前由刷新钩子按需追加，
   // 恢复的老会话也能借此感知工具与扩展的变化
   readonly systemPrompt: SystemPromptAssembler;
+  readonly skillSnapshot: SkillSnapshot;
 
   private readonly _listeners = new Set<
     (event: AgentEvent, signal?: AbortSignal) => Promise<void> | void
   >();
 
-  constructor({ modelApi, tools }: AgentOptions) {
+  constructor({
+    modelApi,
+    tools,
+    skillSnapshot = { skills: [], warnings: [] },
+  }: AgentOptions) {
     this._tools = tools;
+    this.skillSnapshot = skillSnapshot;
     this._state = {
       messages: [],
       modelApi: modelApi,
     };
-    this.systemPrompt = new SystemPromptAssembler({
-      tools,
-      cwd: process.cwd(),
-    });
+    this.systemPrompt = new SystemPromptAssembler(
+      {
+        tools,
+        cwd: process.cwd(),
+      },
+      [
+        {
+          name: 'skills',
+          freshness: 'construction',
+          build: () => formatAvailableSkills(skillSnapshot.skills),
+        },
+      ],
+    );
   }
 
   subscribe(

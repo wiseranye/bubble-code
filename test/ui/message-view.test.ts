@@ -6,11 +6,17 @@ import {
 import chalk from 'chalk';
 import { expect, test } from 'vitest';
 import type { ToolChatMessage } from '../../src/agent/agent-session.ts';
+import {
+  createSkillActivation,
+  formatSkillActivation,
+  type Skill,
+} from '../../src/agent/skills.ts';
 import { newToolRegistry } from '../../src/tools/index.ts';
 import { peekHighlighted } from '../../src/ui/highlight.ts';
 import {
   AssistantMessageView,
   createMessageView,
+  SkillActivationMessageView,
   ToolMessageView,
 } from '../../src/ui/message-view.ts';
 import { defaultToolRenderer } from '../../src/ui/tool-render-default.ts';
@@ -661,4 +667,84 @@ test('an unknown tool name falls back to the generic renderer', () => {
     '⚙ gone-tool → not json',
     '  output',
   ]);
+});
+
+test('SKILL.md reads collapse to one skill header and expand captured output', () => {
+  const output =
+    '---\nname: demo\ndescription: Demo\n---\n# Body\n\n[Showing lines 1-5 of 20. Use offset=6 to continue.]';
+  const view = toolView({
+    id: 19,
+    role: 'tool',
+    toolCallId: 'call-skill',
+    name: 'read',
+    input: '{"filePath":"/tmp/demo/SKILL.md"}',
+    output,
+    status: 'done',
+    success: true,
+  });
+
+  expect(plain(view.render(100))).toEqual(['⚙ skill → /tmp/demo/SKILL.md ▸']);
+
+  view.toggleExpanded();
+  const expanded = plain(view.render(100));
+  expect(expanded[0]).toBe('⚙ skill → /tmp/demo/SKILL.md ▾');
+  expect(expanded).toContain('  ---');
+  expect(expanded).toContain('  # Body');
+  expect(expanded.some(line => line.includes('Use offset=6'))).toBe(true);
+  expect(expanded.at(-1)).toBe('  … 点击收起');
+});
+
+test('failed SKILL.md reads keep the error visible under a red skill header', () => {
+  const view = toolView({
+    id: 20,
+    role: 'tool',
+    toolCallId: 'call-skill-error',
+    name: 'read',
+    input: '{"filePath":"/tmp/missing/SKILL.md"}',
+    output: '',
+    error: 'File not found',
+    status: 'done',
+    success: false,
+  });
+
+  expect(plain(view.render(80))).toEqual([
+    '✗ skill → /tmp/missing/SKILL.md',
+    '  File not found',
+  ]);
+});
+
+test('manual activation renders a skill record instead of XML and keeps extra text', () => {
+  const skill: Skill = {
+    name: 'markitdown',
+    description: 'Convert documents',
+    location: '/tmp/markitdown/SKILL.md',
+    body: '# Body\n\nInstructions',
+  };
+  const activation = createSkillActivation(skill, '检查文档');
+  const content = formatSkillActivation(activation);
+  const view = createMessageView(
+    { id: 21, role: 'user', content, skillActivation: activation },
+    tools,
+    () => undefined,
+  );
+  if (!(view instanceof SkillActivationMessageView)) {
+    throw new TypeError('expected a skill activation view');
+  }
+
+  const collapsed = plain(view.render(100));
+  expect(collapsed).toEqual([
+    '⚙ skill → markitdown — /tmp/markitdown/SKILL.md ▸',
+    '● 检查文档',
+  ]);
+  expect(collapsed.join('\n')).not.toContain('<skill');
+
+  expect(view.handleMouse({ ...clickAt(0), type: 'press' })).toEqual({
+    handled: true,
+  });
+  expect(view.handleMouse(clickAt(0))).toEqual({ handled: true, render: true });
+  const expanded = plain(view.render(100));
+  expect(expanded).toContain('  # Body');
+  expect(expanded).toContain('  Instructions');
+  expect(expanded.at(-1)).toBe('● 检查文档');
+  expect(expanded.join('\n')).not.toContain('<skill');
 });

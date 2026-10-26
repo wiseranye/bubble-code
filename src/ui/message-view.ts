@@ -15,6 +15,9 @@ import type {
   TextChatMessage,
   ToolChatMessage,
 } from '../agent/agent-session.ts';
+import type { SkillActivation } from '../agent/skills.ts';
+import { isSkillReadInput } from '../tools/read.render.ts';
+import { skillRenderer } from '../tools/skill.render.ts';
 import type {
   ToolRegistry,
   ToolRenderer,
@@ -54,7 +57,10 @@ export function createMessageView(
     }
 
     case 'user': {
-      return new UserMessageView(message);
+      const activation = message.skillActivation;
+      return activation === undefined
+        ? new UserMessageView(message)
+        : new SkillActivationMessageView(message, activation, onRenderRequest);
     }
 
     case 'assistant': {
@@ -66,12 +72,14 @@ export function createMessageView(
     }
 
     case 'tool': {
-      // 没有 render、或工具名未知（恢复的旧会话里工具可能已改名）时走兜底渲染器
-      return new ToolMessageView(
-        message,
-        tools.get(message.name)?.render ?? defaultToolRenderer,
-        onRenderRequest,
-      );
+      // 没有 render、或工具名未知（恢复的旧会话里工具可能已改名）时走兜底渲染器。
+      // read SKILL.md 只换展示；输入、输出、截断与执行逻辑完全不变。
+      const renderer =
+        message.name === 'read' &&
+        isSkillReadInput(parseToolInput(message.input))
+          ? skillRenderer
+          : (tools.get(message.name)?.render ?? defaultToolRenderer);
+      return new ToolMessageView(message, renderer, onRenderRequest);
     }
 
     default: {
@@ -131,6 +139,69 @@ class UserMessageView implements MessageView {
 
       return line === '' ? '' : `  ${line}`;
     });
+  }
+}
+
+// 手动激活仍是一条 user Protocol message；视图把结构化内容映射成 Skill 加载记录，
+// 额外描述保留普通用户消息的样式。会话恢复走同一条纯内容解析路径，无需重读文件。
+export class SkillActivationMessageView implements MessageView {
+  private readonly skillView: ToolMessageView;
+  private readonly descriptionView: UserMessageView | undefined;
+  private skillRows = 0;
+
+  constructor(
+    message: TextChatMessage,
+    activation: SkillActivation,
+    onRenderRequest: () => void,
+  ) {
+    const toolMessage: ToolChatMessage = {
+      id: message.id,
+      role: 'tool',
+      toolCallId: `manual-skill-${message.id}`,
+      name: 'skill',
+      input: JSON.stringify({
+        filePath: activation.location,
+        skillName: activation.name,
+      }),
+      output: activation.body,
+      status: 'done',
+      success: true,
+    };
+    this.skillView = new ToolMessageView(
+      toolMessage,
+      skillRenderer,
+      onRenderRequest,
+    );
+    this.descriptionView =
+      activation.additionalDescription.trim() === ''
+        ? undefined
+        : new UserMessageView({
+            id: message.id,
+            role: 'user',
+            content: activation.additionalDescription,
+          });
+  }
+
+  update(_message: ChatMessage): void {
+    // 用户消息提交即冻结，没有需要同步到这条视图的流式更新。
+  }
+
+  invalidate(): void {
+    this.skillView.invalidate();
+    this.descriptionView?.invalidate();
+  }
+
+  handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    if (event.y >= this.skillRows) {
+      return undefined;
+    }
+    return this.skillView.handleMouse(event);
+  }
+
+  render(width: number): string[] {
+    const skillLines = this.skillView.render(width);
+    this.skillRows = skillLines.length;
+    return [...skillLines, ...(this.descriptionView?.render(width) ?? [])];
   }
 }
 
@@ -328,7 +399,9 @@ export class ToolMessageView implements MessageView {
   ): string {
     const failed = state.status === 'done' && !state.success;
     const mark = style.toolMark(failed ? '✗' : '⚙', failed);
-    const name = style.toolName(this.message.name, failed);
+    const displayName =
+      this.renderer.displayName?.(state.input) ?? this.message.name;
+    const name = style.toolName(displayName, failed);
     const running =
       state.status === 'running' ? style.running('（执行中…）') : '';
     const summary =
