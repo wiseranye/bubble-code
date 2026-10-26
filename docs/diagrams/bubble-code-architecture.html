@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>bubble-code 整体架构</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&family=Noto+Serif:ital@0;1&family=Noto+Serif+SC:wght@400&family=Noto+Sans+SC:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f5f5f5;
+      --color-ink:     #2d3142;
+      --color-muted:   #4f5d75;
+      --color-soft:    #5a6580;
+      --color-accent:  #bf4520;
+      --color-link:    #2e5aa8;
+      --color-rule:    rgba(45, 49, 66, 0.12);
+      --font-sans:     'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif', 'Noto Serif SC', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3rem 2rem;
+    }
+
+    .frame { max-width: 1360px; width: 100%; max-width: 100%; min-width: 0; }
+
+    /* The SVG holds its readable width (min-width == the viewBox width, so the
+       type ramp is never silently scaled down). This wrapper lets a narrow
+       screen scroll the diagram instead of the whole page. */
+    .diagram-container { width: 100%; overflow-x: auto; }
+
+    .eyebrow {
+      font-family: var(--font-mono);
+      font-size: 0.66rem;
+      font-weight: 500;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      color: var(--color-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    h1 {
+      font-family: var(--font-serif);
+      font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      color: var(--color-ink);
+      margin-bottom: 0.75rem;
+    }
+
+    .subtitle {
+      font-family: var(--font-sans);
+      font-size: 0.95rem;
+      line-height: 1.6;
+      color: var(--color-muted);
+      max-width: 62ch;
+      margin-bottom: 1.75rem;
+    }
+
+    svg { width: 100%; min-width: 1280px; display: block; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: 1.1fr 1fr 0.9fr;
+      gap: 1rem;
+      margin-top: 2rem;
+    }
+
+    .card {
+      background: #ffffff;
+      border: 1px solid var(--color-rule);
+      border-radius: 6px;
+      padding: 1.25rem;
+    }
+
+    .card .eyebrow { margin-bottom: 0.6rem; }
+
+    .card-header { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+
+    .card-header h3 {
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      font-weight: 600;
+      letter-spacing: 0;
+      color: var(--color-ink);
+    }
+
+    .card-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+    .card-dot.ink { background: var(--color-ink); }
+    .card-dot.accent { background: var(--color-accent); }
+    .card-dot.link { background: var(--color-link); }
+
+    .card p { font-size: 0.85rem; line-height: 1.65; color: var(--color-muted); }
+    .card code { font-family: var(--font-mono); font-size: 0.8rem; color: var(--color-ink); }
+
+    footer {
+      margin-top: 2rem;
+      padding-top: 0.9rem;
+      border-top: 1px solid var(--color-rule);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.04em;
+      color: var(--color-soft);
+    }
+
+    @media (max-width: 900px) {
+      .cards { grid-template-columns: 1fr; }
+    }
+
+    /* Paper has no scrollbar, so the local scroller would clip instead of
+       scroll. Let the diagram scale down to the sheet. */
+    @media print {
+      body { padding: 0; }
+      .diagram-container { overflow-x: visible; }
+      svg { min-width: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">Architecture · bubble-code</p>
+    <h1>bubble-code 整体架构</h1>
+    <p class="subtitle">终端里的编码智能体。界面只负责输入与渲染，会话状态持有对话记录，运行循环在钩子处维护上下文，并调用模型与工具。</p>
+
+    <div class="diagram-container">
+      <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="bubble-arch-title bubble-arch-desc">
+        <title id="bubble-arch-title">bubble-code 整体架构</title>
+        <desc id="bubble-arch-desc">模块关系图：终端对话界面把输入提交给 AgentSession，AgentSession 把提示词交给 Agent 运行循环；运行循环调用 ModelApi 与工具注册中心，并经钩子由上下文维护补充系统提示词与压缩；AgentSession 把消息追加到会话文件，并以聊天消息的形式驱动界面渲染。</desc>
+        <defs>
+          <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#4f5d75"/>
+          </marker>
+          <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#bf4520"/>
+          </marker>
+          <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+            <polygon points="0 0, 8 3, 0 6" fill="#2e5aa8"/>
+          </marker>
+        </defs>
+
+        <rect width="100%" height="100%" fill="#f5f5f5"/>
+
+        <!-- Zones: drawn first -->
+        <rect x="300" y="176" width="680" height="272" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+        <rect x="432" y="496" width="424" height="112" rx="8" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+        <rect x="316" y="174" width="68" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="350" y="186" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">智能体核心</text>
+        <rect x="440" y="494" width="56" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="468" y="506" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">外部能力</text>
+
+        <!-- Arrows: drawn before boxes -->
+        <path d="M 600,104 V 208" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 680,208 V 104" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <path d="M 600,264 V 368" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 680,368 V 264" fill="none" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4" marker-end="url(#arrow)"/>
+        <path d="M 560,236 H 456" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 720,396 H 820" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 612,424 V 468 H 520 Q 512,468 512,476 V 528" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+        <path d="M 668,424 V 468 H 758 Q 766,468 766,476 V 528" fill="none" stroke="#4f5d75" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+        <!-- Arrow labels: opaque mask, 8px clear of the stroke -->
+        <rect x="560" y="148" width="32" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="576" y="160" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">提交</text>
+        <rect x="688" y="148" width="56" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="716" y="160" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">聊天消息</text>
+        <rect x="536" y="300" width="56" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="564" y="312" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">发起运行</text>
+        <rect x="688" y="300" width="44" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="710" y="312" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">事件流</text>
+        <rect x="480" y="212" width="56" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="508" y="224" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">追加条目</text>
+        <rect x="754" y="372" width="32" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="770" y="384" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">钩子</text>
+        <rect x="538" y="444" width="56" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="566" y="456" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">流式请求</text>
+        <rect x="686" y="444" width="56" height="16" rx="2" fill="#f5f5f5"/>
+        <text x="714" y="456" fill="#5a6580" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">执行工具</text>
+
+        <!-- Node: TUI 对话界面 (input) -->
+        <rect x="560" y="48" width="160" height="56" rx="6" fill="#f5f5f5"/>
+        <rect x="560" y="48" width="160" height="56" rx="6" fill="rgba(79,93,117,0.10)" stroke="#5a6580" stroke-width="1"/>
+        <text x="640" y="72" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">TUI 对话界面</text>
+        <text x="640" y="88" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">src/ui · pi-tui</text>
+
+        <!-- Node: 会话文件 (store) -->
+        <rect x="328" y="208" width="128" height="56" rx="6" fill="#f5f5f5"/>
+        <rect x="328" y="208" width="128" height="56" rx="6" fill="rgba(45,49,66,0.05)" stroke="#4f5d75" stroke-width="1"/>
+        <text x="392" y="232" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">会话文件</text>
+        <text x="392" y="248" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">jsonl · ~/.bubble</text>
+
+        <!-- Node: AgentSession (focal) -->
+        <rect x="560" y="208" width="160" height="56" rx="6" fill="#f5f5f5"/>
+        <rect x="560" y="208" width="160" height="56" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+        <text x="640" y="232" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">AgentSession</text>
+        <text x="640" y="248" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">transcript · events</text>
+
+        <!-- Node: Agent 运行循环 (focal) -->
+        <rect x="560" y="368" width="160" height="56" rx="6" fill="#f5f5f5"/>
+        <rect x="560" y="368" width="160" height="56" rx="6" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+        <text x="640" y="392" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">Agent 运行循环</text>
+        <text x="640" y="408" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">run · turn · tools</text>
+
+        <!-- Node: 上下文维护 (optional / hook) -->
+        <rect x="820" y="368" width="140" height="56" rx="6" fill="#f5f5f5"/>
+        <rect x="820" y="368" width="140" height="56" rx="6" fill="rgba(45,49,66,0.02)" stroke="rgba(45,49,66,0.20)" stroke-width="1" stroke-dasharray="4,3"/>
+        <text x="890" y="392" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">上下文维护</text>
+        <text x="890" y="408" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">prompt · compaction</text>
+
+        <!-- Node: ModelApi (external) -->
+        <rect x="456" y="528" width="112" height="56" rx="6" fill="#f5f5f5"/>
+        <rect x="456" y="528" width="112" height="56" rx="6" fill="rgba(45,49,66,0.03)" stroke="rgba(45,49,66,0.30)" stroke-width="1"/>
+        <text x="512" y="552" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">ModelApi</text>
+        <text x="512" y="568" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">pi-ai · catalog</text>
+
+        <!-- Node: 工具注册中心 (backend) -->
+        <rect x="696" y="528" width="140" height="56" rx="6" fill="#f5f5f5"/>
+        <rect x="696" y="528" width="140" height="56" rx="6" fill="#ffffff" stroke="#2d3142" stroke-width="1"/>
+        <text x="766" y="552" fill="#2d3142" font-size="12" font-weight="600" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif" text-anchor="middle">工具注册中心</text>
+        <text x="766" y="568" fill="#4f5d75" font-size="9" font-family="'Geist Mono', ui-monospace, monospace" text-anchor="middle">bash · read · edit</text>
+
+        <!-- Legend: horizontal strip at the bottom -->
+        <line x1="40" y1="656" x2="1240" y2="656" stroke="rgba(45,49,66,0.10)" stroke-width="0.8"/>
+        <text x="40" y="682" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">图例</text>
+        <line x1="96" y1="677" x2="120" y2="677" stroke="#4f5d75" stroke-width="1.2"/>
+        <text x="128" y="682" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">调用</text>
+        <line x1="216" y1="677" x2="240" y2="677" stroke="#4f5d75" stroke-width="1" stroke-dasharray="5,4"/>
+        <text x="248" y="682" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">事件回传</text>
+        <rect x="360" y="670" width="14" height="14" rx="4" fill="rgba(191,69,32,0.08)" stroke="#bf4520" stroke-width="1"/>
+        <text x="382" y="682" fill="#4f5d75" font-size="12" font-weight="500" font-family="'Geist', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif">焦点</text>
+      </svg>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <p class="eyebrow">Composition</p>
+        <div class="card-header"><span class="card-dot ink"></span><h3>启动装配</h3></div>
+        <p><code>src/cli.ts</code> 是唯一的装配点：读取 settings、构建 ModelCatalog 与 ToolRegistry，再交给会话工厂。每个会话建一个 Agent，Skill 目录在此时扫描一次，之后只消费这份快照。</p>
+      </div>
+      <div class="card">
+        <p class="eyebrow">Run loop</p>
+        <div class="card-header"><span class="card-dot accent"></span><h3>一次 run 的内循环</h3></div>
+        <p>每个 turn 前先跑 <code>prepareTurn</code> 钩子（刷新系统提示词、超阈值则压缩），再向模型发起流式请求。工具按顺序执行，结果回灌历史，直到模型不再发起工具调用。</p>
+      </div>
+      <div class="card">
+        <p class="eyebrow">Representations</p>
+        <div class="card-header"><span class="card-dot link"></span><h3>三套表示</h3></div>
+        <p>协议消息发给模型，聊天消息给界面渲染，会话文件条目用于重放。压缩写入 compaction 条目，恢复时据此重建上下文。</p>
+      </div>
+    </div>
+
+    <footer>bubble-code · src/{agent,llm,tools,ui} 的模块关系 · 图中省略 src/utils 与设置项细节</footer>
+  </div>
+</body>
+</html>
