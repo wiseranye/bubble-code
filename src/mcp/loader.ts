@@ -4,6 +4,7 @@ import {
   type Transport,
 } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
+import { APP_NAME, APP_VERSION } from '../app-info.ts';
 import { truncateTail } from '../utils/truncate.ts';
 import type { McpServerConfig } from './config.ts';
 import { createMcpTools } from './tool.ts';
@@ -25,7 +26,7 @@ export async function loadMcpServer(
   options: LoadMcpServerOptions,
 ): Promise<LoadedMcpServer> {
   const client = new Client(
-    { name: 'bubble-code', version: '0.2.0' },
+    { name: APP_NAME, version: APP_VERSION },
     {
       capabilities: {},
       versionNegotiation: { mode: 'auto' },

@@ -6,6 +6,7 @@ import type {
   AssistantMessageEvent as PiAssistantMessageEvent,
 } from '@earendil-works/pi-ai';
 import { expect, test } from 'vitest';
+import { APP_VERSION } from '../../src/app-info.ts';
 import {
   assembleModel,
   convertPiEvent,
@@ -17,7 +18,6 @@ import {
   loadSettings,
   type ProviderConfig,
 } from '../../src/setting-manager.ts';
-import { readVersion } from '../../src/utils/version.ts';
 
 const ZERO_COST = {
   input: 0,
@@ -159,8 +159,8 @@ test('reasoning 档位 → 能力布尔：配了档位即 true，没配跟随 ca
   ).toBe(true);
 });
 
-test('User-Agent 覆盖为 bubble-cli/<version>，catalog 自带的 headers 保留', () => {
-  const expected = `bubble-cli/${readVersion() ?? 'dev'}`;
+test('User-Agent 覆盖为 bubble-code/<version>，catalog 自带的 headers 保留', () => {
+  const expected = `bubble-code/${APP_VERSION}`;
   // catalog 未命中
   expect(assembleModel(provider({}), { id: 'acme-model' }).headers).toEqual({
     'User-Agent': expected,

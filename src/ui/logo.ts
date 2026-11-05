@@ -1,6 +1,6 @@
 import type { Component } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
-import { readVersion } from '../utils/version.ts';
+import { APP_DISPLAY_NAME, APP_VERSION } from '../app-info.ts';
 import { style } from './theme.ts';
 
 // 像素点阵：# 是一个像素，统一 6 行高。
@@ -122,16 +122,16 @@ const fullWidth = logoWidth + 4 + 31;
 
 // 启动横幅：像素字标在左，版本号和快捷键在右；宽度不够时逐级降级
 export class LogoBanner implements Component {
-  private readonly version = readVersion();
-
   invalidate(): void {
     // 内容固定，没有缓存需要清
   }
 
   render(width: number): string[] {
     if (width < logoWidth + 2) {
-      const version = this.version === undefined ? '' : ` v${this.version}`;
-      return [`${style.logo('○ Bubble Code')}${style.dim(version)}`, ''];
+      return [
+        `${style.logo(`○ ${APP_DISPLAY_NAME}`)}${style.dim(` v${APP_VERSION}`)}`,
+        '',
+      ];
     }
 
     const lines = logoRows.map(row => gradientLine(row));
@@ -149,7 +149,7 @@ export class LogoBanner implements Component {
   // 右列对齐到字标的三行：版本号、两行快捷键
   private mergeRightColumn(logoLines: string[]): void {
     const right = [
-      style.dim(this.version === undefined ? '' : `v${this.version}`),
+      style.dim(`v${APP_VERSION}`),
       renderHints(hintLine1),
       renderHints(hintLine2),
     ];
