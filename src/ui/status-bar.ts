@@ -1,5 +1,6 @@
 import { type Component, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import type { McpStatus } from '../mcp/manager.ts';
 import type { StatusBarStyle } from '../setting-manager.ts';
 import { style as themeStyle } from './theme.ts';
 
@@ -10,11 +11,12 @@ export type StatusBarData = {
   homeDir: string;
   // undefined 表示非 Git 仓库 / 还没读到分支
   branch: string | undefined;
+  mcp: McpStatus | undefined;
   context: { used: number; window: number } | undefined;
   cache: { read: number; promptTokens: number } | undefined;
 };
 
-type BlockKey = 'model' | 'cwd' | 'branch' | 'context' | 'cache';
+type BlockKey = 'model' | 'cwd' | 'branch' | 'mcp' | 'context' | 'cache';
 
 type Block = {
   key: BlockKey;
@@ -32,11 +34,12 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, {
   granularity: 'grapheme',
 });
 
-// Nerd Font 图标：模型、目录、分支、上下文、缓存
+// Nerd Font 图标：模型、目录、分支、MCP、上下文、缓存
 const icons: Record<BlockKey, string> = {
   model: '\u{F2DB}',
   cwd: '\u{F07B}',
   branch: '\u{E0A0}',
+  mcp: '\u{F1E6}',
   context: '\u{F1C0}',
   cache: '\u{F0E7}',
 };
@@ -46,6 +49,7 @@ const segmentColors: Record<BlockKey, SegmentColor> = {
   model: chalk.cyan,
   cwd: chalk.blue,
   branch: chalk.magenta,
+  mcp: chalk.cyan,
   context: chalk.green,
   cache: chalk.gray,
 };
@@ -201,6 +205,11 @@ function buildBlocks(data: StatusBarData, barStyle: StatusBarStyle): Block[] {
     blocks.push(makeBlock('context', context, decorated));
   }
 
+  if (data.mcp !== undefined) {
+    const mcp = `✓ ${data.mcp.connected}  ◌ ${data.mcp.connecting}  ✗ ${data.mcp.failed}`;
+    blocks.push(makeBlock('mcp', mcp, decorated));
+  }
+
   if (data.cache !== undefined) {
     const cache = `${formatTokens(data.cache.read)} (${formatPercent(
       data.cache.read,
@@ -221,6 +230,8 @@ function makeBlock(
   let prefix = '';
   if (decorated) {
     prefix = `${icons[key]} `;
+  } else if (key === 'mcp') {
+    prefix = 'MCP ';
   } else if (key === 'context') {
     prefix = '上下文 ';
   } else if (key === 'cache') {

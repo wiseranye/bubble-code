@@ -54,8 +54,14 @@ export type ToolResult = {
   metadata?: Record<string, unknown>;
 };
 
+export interface ToolSource {
+  list(): AnyTool[];
+  find(name: string): AnyTool;
+  get(name: string): AnyTool | undefined;
+}
+
 // 工具注册中心
-export class ToolRegistry {
+export class ToolRegistry implements ToolSource {
   private readonly tools = new Map<string, AnyTool>();
 
   register<T>(tool: Tool<T>): void {

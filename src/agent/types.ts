@@ -6,7 +6,7 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from '../llm/types.ts';
-import type { ToolRegistry } from '../tools/types.ts';
+import type { ToolSource } from '../tools/types.ts';
 
 // Agent 事件
 export type AgentEvent =
@@ -44,7 +44,8 @@ export type AgentEvent =
 
 export type AgentContext = {
   // 工具注册中心
-  tools: ToolRegistry;
+  tools: ToolSource;
+  cwd: string;
   // 会话中所有的消息
   messages: AgentMessage[];
 };

@@ -130,7 +130,7 @@ export class AgentSession {
     agent.registerHook({
       prepareTurn: context => this.compactBeforeRequest(context),
     });
-    this.sessionManager = new SessionManager(process.cwd(), sessionFile);
+    this.sessionManager = new SessionManager(agent.cwd, sessionFile);
     if (sessionFile === undefined) {
       // 欢迎语在 UI 订阅之前就存在，启动时直接补建视图
       this.store.push({
@@ -282,6 +282,10 @@ export class AgentSession {
 
   get messages(): readonly ChatMessage[] {
     return this.store;
+  }
+
+  get cwd(): string {
+    return this.agent.cwd;
   }
 
   get skills(): readonly Skill[] {
@@ -474,7 +478,7 @@ export class AgentSession {
   // 有变化或无基线（如恢复的老会话）时，追加一条完整的新系统消息并立即落盘。
   // 内存与会话文件都按生产顺序追加；发给模型时由发送视图把最后一条系统消息移到开头
   private refreshSystemPrompt(context: AgentLoopHookContext): void {
-    const built = this.agent.systemPrompt.build();
+    const built = this.agent.systemPrompt.build(this.agent.toolSnapshot);
     const baseline = lastSystemMessage(context.messages);
     if (
       baseline !== undefined &&

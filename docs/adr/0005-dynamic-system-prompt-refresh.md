@@ -16,6 +16,7 @@
 - 统一 run / turn 生命周期钩子 `AgentLoopHook { prepareRun, prepareTurn }`：`prepareRun` 在每次 run 开始、用户消息进入历史与落盘之前触发；`prepareTurn` 在每次模型请求之前触发。同一时机的钩子按注册顺序串行执行，单个钩子抛错只记日志、不中断 run。`BeforeRequestHook` 随之移除，压缩迁移为 `prepareTurn` 内置钩子（本条的钩子机制取代 ADR 0004 的 `beforeRequest` 检查点机制）。
 - 系统提示词刷新是内置钩子（`prepareRun` 与 `prepareTurn` 都挂）：重新装配后与最后一条系统消息逐节对比指纹；无变化则不动作，有变化或无基线就追加一条**完整快照**的系统消息并立即落盘。内置钩子的注册顺序保证刷新先于压缩，压缩总能看到刷新后的列表。
 - 构造管线按节装配：内置节 identity / tools / project_context / cwd 都是 `PromptSectionProvider`；节声明 `freshness`（`construction` 只求值一次并缓存，如 project_context；`per-refresh` 每次装配重算，如 tools）。extension 未来以注册命名节的方式修改系统提示词。
+- 工具列表以 Run 快照为准：`prepareRun` 固定本次 Run 的 Tool 集合，`prepareTurn` 刷新继续使用该快照；MCP 等异步工具在 Run 中途就绪时，从下一个 Run 开始进入系统提示词和模型工具列表。
 - 系统消息携带 `sections` 元数据（节名 → 内容指纹）并随消息落盘，作为下次刷新与 resume 后的对比基线；老格式条目没有该字段，视为无基线（恢复后首个 run 必追加一条新系统消息）。
 - 存储层（内存与会话文件）允许任意多条系统消息，按生产顺序追加；发给 provider 时在 loop 层生成发送视图：只保留最后一条系统消息并移到开头，其余消息保持原序。该投影与 provider 无关，`toPiContext` 不变。
 - `Agent` 构造函数不再预建系统提示词；恢复会话按文件内容重放，漂移由首个 `prepareRun` 的刷新处理。恢复投影始终包含文件中最后一条系统消息（即使它在压缩保留区间之外），充当刷新基线，避免恢复后重复追加相同的一条。
@@ -25,7 +26,7 @@
 
 ### 收益
 
-- 新增工具、升级 CLI 后 resume 老会话、未来 MCP / Skill 中途接入，都能在最近一个请求边界被会话感知，无需新开会话。
+- 新增工具、升级 CLI 后 resume 老会话、MCP / Skill 异步接入，都能在后续 Run 被会话感知，无需新开会话；Run 中途变化不会导致工具列表与系统提示词不一致。
 - 每条系统消息是带节指纹的完整快照：盘上可审计「当时用的是哪份提示词」，diff 不需要重放历史。
 - 发送视图集中在 loop 层一次实现，未来接非 pi-ai 的 provider 不必重新实现这套系统消息语义。
 - 钩子机制统一了请求前检查点：压缩与刷新走同一通道，后续生命周期需求直接注册即可。

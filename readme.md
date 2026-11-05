@@ -33,6 +33,30 @@ $BUBBLE_HOME/skills
 - 输入 `/skill:` 可补全并手动加载 Skill；补全选择后可输入额外描述，也可直接发送。
 - 模型读取或用户手动加载 Skill 时，界面显示可点击展开的 `skill` 记录。
 
+## MCP
+
+从 `$BUBBLE_HOME/mcp.jsonc`（默认 `~/.bubble/mcp.jsonc`）读取 MCP Server 配置。支持 stdio 与 Streamable HTTP，Server 工具会注册为普通工具：
+
+```jsonc
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": ["serve"],
+      "env": {},
+    },
+    "remote": {
+      "type": "remote",
+      "url": "https://example.com/mcp",
+      "headers": {},
+    },
+  },
+}
+```
+
+配置在 CLI 启动时校验；MCP 在新建或恢复会话时并行异步加载，首个 Run 不等待未就绪工具。相同会话工作目录共享 MCP 状态，不同目录相互隔离。
+
 ## 安装与运行
 
 需要 Node.js >= 22.19，以及交互式终端（TTY）。

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { join } from 'node:path';
 import process from 'node:process';
 import { ProcessTerminal, TuiAltScreen } from '@earendil-works/pi-tui';
 import meow from 'meow';
@@ -10,6 +11,9 @@ import {
 } from './agent/compaction.ts';
 import { initRuntime } from './agent/runtime.ts';
 import { ModelCatalog } from './llm/model-catalog.ts';
+import { loadMcpConfig } from './mcp/config.ts';
+import { McpManager } from './mcp/manager.ts';
+import { SessionToolRegistry } from './mcp/session-tools.ts';
 import { SettingManager } from './setting-manager.ts';
 import { newToolRegistry } from './tools/index.ts';
 import { createChatApp } from './ui/app.ts';
@@ -40,14 +44,20 @@ async function main(): Promise<void> {
   setTerminalTitle('bubble');
   const runtime = initRuntime();
   const settings = await new SettingManager(runtime).load();
+  const mcpConfig = await loadMcpConfig(join(runtime.homeDir(), 'mcp.jsonc'));
   // 可选模型目录：/model 的切换目标，选中项是 app 级状态，新会话跟随
   const catalog = new ModelCatalog(settings);
   // 工具注册中心同时给 Agent 和 UI 用：UI 靠它拿到每个工具的渲染器
   const tools = newToolRegistry();
+  const mcp = new McpManager(
+    mcpConfig,
+    tools.list().map(tool => tool.name),
+  );
   // 每个会话一个 Agent：协议历史随会话走，/new 和 /resume 都不会串上下文。
   // 没配模型不拦启动；首次发消息时由 Agent 提示
   const createAgent = createAgentFactory({
     tools,
+    createTools: () => new SessionToolRegistry(tools, mcp, runtime.cwd()),
     discoveryOptions: {
       cwd: runtime.cwd(),
       bubbleHome: runtime.homeDir(),
@@ -76,11 +86,25 @@ async function main(): Promise<void> {
   const tui = new TuiAltScreen(terminal, undefined, undefined, { mouse: true });
   createChatApp(
     tui,
-    sessionFile =>
-      new AgentSession(createAgent(), sessionFile, createCompactConfig()),
+    sessionFile => {
+      const session = new AgentSession(
+        createAgent(),
+        sessionFile,
+        createCompactConfig(),
+      );
+      void mcp.start(
+        runtime.cwd(),
+        warning => session.notify(warning),
+        () => tui.requestRender(),
+      );
+      return session;
+    },
     tools,
     catalog,
     settings.statusBar,
+    () => mcp.close(),
+    cwd => mcp.statusFor(cwd),
+    () => mcp.connections(),
   );
   tui.start();
 }

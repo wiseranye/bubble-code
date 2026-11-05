@@ -281,7 +281,7 @@ async function runLoop(
         // eslint-disable-next-line no-await-in-loop, unicorn/no-array-callback-reference -- 工具按顺序执行；ToolRegistry.find 不是 Array.find
         const result = await context.tools
           .find(name)
-          .execute(input, { cwd: process.cwd(), signal });
+          .execute(input, { cwd: context.cwd, signal });
         success = result.success;
         // error 和 output 分开保留；拼成模型可见文本的事在 llm 适配层做
         output = result.output;

@@ -8,6 +8,10 @@ bubble-code 是一个运行在终端里的编码智能体（coding agent）：�
 负责一轮任务的执行者：把用户输入交给模型，流式产出助手文本，执行工具调用，并维护与模型交换的协议历史。
 _Avoid_: Bot、Assistant、Backend
 
+**Run（运行）**:
+由一条用户消息触发的一次完整 Agent 执行，直到产生不需要继续调用工具或模型的结果。
+_Avoid_: Turn、Request
+
 **Protocol message（协议消息）**:
 与模型交换的一条消息，只有 role / content / extra 三个字段，不含任何展示概念。
 _Avoid_: Chat message
@@ -24,6 +28,10 @@ _Avoid_: History、Log、Messages
 一段对话的状态拥有者：维护 Transcript、接收 Agent 事件流并映射为 Chat message、处理取消与错误，不含任何渲染逻辑。
 _Avoid_: ChatController、ViewModel、Store、Conversation
 
+**Session working directory（会话工作目录）**:
+一个 ChatSession 的实际工作目录，是目录相关工具状态的隔离边界；不同 ChatSession 可以使用不同目录。
+_Avoid_: CLI 启动目录、进程 cwd
+
 **Sealed（已冻结）**:
 一条不再随流式输出变化的 Chat message。冻结之后仍允许用户主动触发的更新（展开/收起工具消息的正文）。
 _Avoid_: Finalized、Committed、Closed
@@ -31,6 +39,18 @@ _Avoid_: Finalized、Committed、Closed
 **Tool message（工具消息）**:
 一条记录单次工具调用的 Chat message：工具名、原始输入、执行输出与状态（running / done）。
 _Avoid_: Tool call（那是协议层的记录）
+
+**MCP tool（MCP 工具）**:
+由外部 MCP Server 提供的工具，在 Agent 看来与普通工具相同。
+_Avoid_: MCP 元工具、Resource、Prompt
+
+**MCP state（MCP 状态）**:
+按 MCP Server 与 Session working directory 隔离、由多个 ChatSession 共享的外部工具使用状态。
+_Avoid_: Session 私有连接、全局工具状态
+
+**Tool snapshot（工具快照）**:
+一次 Run 开始时确定的可用工具集合；该 Run 期间保持不变，后续 Run 可以包含新就绪的 MCP 工具。
+_Avoid_: Live tools、Turn 工具列表
 
 **Context（上下文）**:
 一次请求发给模型的全部 Protocol message：system prompt、（如有）最近一次压缩的摘要、保留区间。

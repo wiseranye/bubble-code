@@ -27,6 +27,14 @@ test('no placeholder for unknown commands or commands without arguments', () => 
   expect(slashCommandArgumentPlaceholder('')).toBeUndefined();
 });
 
+test('mcp command opens the connection viewer without arguments', () => {
+  expect(matchSlashCommand('/mcp')).toEqual({
+    command: expect.objectContaining({ name: 'mcp' }),
+    argument: '',
+  });
+  expect(matchSlashCommand('/mcp extra')).toBeUndefined();
+});
+
 test('a bare argument-taking command matches with an empty argument', () => {
   // 提交拦截依赖这个约定：argument 为空时不执行，留在输入框继续编辑
   expect(matchSlashCommand('/rename')).toEqual({

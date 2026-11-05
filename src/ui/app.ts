@@ -30,10 +30,12 @@ import {
   type SessionFileEntry,
 } from '../agent/session-manager.ts';
 import type { ModelCatalog, ModelChoice } from '../llm/model-catalog.ts';
+import type { McpConnection, McpStatus } from '../mcp/manager.ts';
 import type { StatusBarConfig } from '../setting-manager.ts';
 import type { ToolRegistry } from '../tools/types.ts';
 import { readGitBranch } from '../utils/git.ts';
 import { LogoBanner } from './logo.ts';
+import { McpPicker } from './mcp-picker.ts';
 import {
   AssistantMessageView,
   createMessageView,
@@ -61,6 +63,9 @@ export function createChatApp(
   tools: ToolRegistry,
   catalog: ModelCatalog,
   statusBarConfig: StatusBarConfig,
+  closeMcp: () => Promise<void>,
+  getMcpStatus: (cwd: string) => McpStatus | undefined,
+  getMcpConnections: () => readonly McpConnection[],
 ): void {
   // 转录文档：启动横幅 + 消息区。全屏模式下它挂在 ScrollView 里滚动，
   // /new、/resume 只清消息区，横幅不会被带走
@@ -121,9 +126,10 @@ export function createChatApp(
               label: `${choice.provider.name}/${choice.model.name ?? choice.model.id}`,
               reasoning: choice.model.reasoning,
             },
-      cwd: process.cwd(),
+      cwd: session.cwd,
       homeDir: homedir(),
       branch,
+      mcp: getMcpStatus(session.cwd),
       context:
         choice === undefined
           ? undefined
@@ -172,6 +178,20 @@ export function createChatApp(
     }
   };
 
+  let quitting = false;
+  const quit = (): void => {
+    if (quitting) {
+      return;
+    }
+    quitting = true;
+    // 全屏模式退出时不重画"文档"：转录区在非布局上下文里只剩 1 行，
+    // 重画出来的是半截画面，直接切回普通屏更干净（pi 的做法）
+    tui.stop({ preserveScreen: true });
+    void closeMcp()
+      .catch(() => {})
+      .then(() => process.exit(0));
+  };
+
   const handleKey = (data: string): TuiInputListenerResult => {
     // 弹窗打开时按键全部交给弹窗处理（Esc / Ctrl+C 由 SelectList 走取消）
     if (tui.hasOverlay()) {
@@ -179,12 +199,8 @@ export function createChatApp(
     }
 
     if (matchesKey(data, Key.ctrl('c'))) {
-      // 全屏模式退出时不重画"文档"：转录区在非布局上下文里只剩 1 行，
-      // 重画出来的是半截画面，直接切回普通屏更干净（pi 的做法）
-      tui.stop({ preserveScreen: true });
-      // Ctrl+C 直接退出：这是前台 TUI 进程，退出就是它的职责
-      // eslint-disable-next-line unicorn/no-process-exit
-      process.exit(0);
+      quit();
+      return { consume: true };
     }
 
     if (matchesKey(data, Key.escape)) {
@@ -313,6 +329,26 @@ export function createChatApp(
     );
   };
 
+  const openMcpPicker = (): void => {
+    const connections = getMcpConnections();
+    if (connections.length === 0) {
+      session.notify('未配置 MCP Server');
+      return;
+    }
+
+    let overlay: OverlayHandle | undefined;
+    const close = (): void => {
+      overlay?.hide();
+      overlay = undefined;
+    };
+    const picker = new McpPicker(connections, close, () => tui.requestRender());
+    overlay = tui.showOverlay(picker, {
+      width: '70%',
+      maxHeight: 20,
+      anchor: 'center',
+    });
+  };
+
   // /model：弹出可选模型列表
   const openModelPicker = (): void => {
     let overlay: OverlayHandle | undefined;
@@ -378,6 +414,11 @@ export function createChatApp(
         break;
       }
 
+      case 'mcp': {
+        openMcpPicker();
+        break;
+      }
+
       case 'model': {
         if (session.isStreaming || session.isCompacting) {
           session.notify('请等待当前会话结束');
@@ -396,9 +437,7 @@ export function createChatApp(
       }
 
       case 'quit': {
-        tui.stop({ preserveScreen: true });
-        process.exit(0);
-        // process.exit 不会返回，break 只是为了过 lint
+        quit();
         break;
       }
 

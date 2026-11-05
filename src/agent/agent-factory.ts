@@ -1,10 +1,11 @@
 import type { ModelApi } from '../llm/types.ts';
-import type { ToolRegistry } from '../tools/types.ts';
+import type { ToolRegistry, ToolSource } from '../tools/types.ts';
 import { Agent } from './agent.ts';
 import { type DiscoverSkillsOptions, discoverSkills } from './skills.ts';
 
 export interface AgentFactoryOptions {
   readonly tools: ToolRegistry;
+  readonly createTools?: () => ToolSource;
   readonly createModelApi: () => ModelApi | undefined;
   readonly discoveryOptions: DiscoverSkillsOptions;
   // 测试可注入 spy；生产始终使用真实发现函数。
@@ -19,7 +20,8 @@ export function createAgentFactory(options: AgentFactoryOptions): () => Agent {
     const skillSnapshot = discover(options.discoveryOptions);
     return new Agent({
       modelApi: options.createModelApi(),
-      tools: options.tools,
+      tools: options.createTools?.() ?? options.tools,
+      cwd: options.discoveryOptions.cwd,
       skillSnapshot,
     });
   };

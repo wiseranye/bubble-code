@@ -27,6 +27,7 @@ export const slashCommands: SlashCommand[] = [
   { name: 'resume', description: '恢复已有会话' },
   { name: 'fork', description: '从当前会话新建会话' },
   { name: 'model', description: '切换模型' },
+  { name: 'mcp', description: '查看 MCP 连接与工具' },
   { name: 'rename', description: '修改当前会话名称', argumentHint: '会话名称' },
   { name: 'compact', description: '压缩当前会话' },
 ];

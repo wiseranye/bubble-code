@@ -1,12 +1,12 @@
 // 系统提示词按节装配：每节一个 provider，刷新时逐节对比指纹决定是否追加新的系统消息。
 // 'construction' 节在装配器生命周期内只求值一次（比如 project_context 读盘）；
-// 'per-refresh' 节每次装配都重新求值（工具列表、未来的 MCP 节）；Skill 节只格式化预加载快照
+// 'per-refresh' 节每次装配都重新求值（工具列表使用当前 Run 快照）；Skill 节只格式化预加载快照
 
 import { createHash } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import chalk from 'chalk';
-import type { ToolRegistry } from '../tools/types.ts';
+import type { ToolSource } from '../tools/types.ts';
 import { stripBom } from '../utils/text.ts';
 
 const IDENTITY = `你是 Bubble Code，一个运行在命令行中的交互式编码助手。
@@ -14,7 +14,7 @@ const IDENTITY = `你是 Bubble Code，一个运行在命令行中的交互式�
 回答问题前先保证有了足够的信息，不要凭空猜测。`;
 
 export interface PromptSectionContext {
-  tools: ToolRegistry;
+  tools: ToolSource;
   cwd: string;
 }
 
@@ -44,14 +44,15 @@ export class SystemPromptAssembler {
     this.providers = [...builtinSectionProviders(), ...extraProviders];
   }
 
-  build(): BuiltSystemPrompt {
+  build(tools: ToolSource = this.context.tools): BuiltSystemPrompt {
+    const context = { ...this.context, tools };
     const parts: string[] = [];
     const sections: Record<string, string> = {};
     for (const provider of this.providers) {
       const content =
         provider.freshness === 'construction'
           ? this.buildConstruction(provider)
-          : provider.build(this.context);
+          : provider.build(context);
       if (content === undefined) {
         continue;
       }

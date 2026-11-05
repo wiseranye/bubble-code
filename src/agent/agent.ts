@@ -1,7 +1,7 @@
 // 有状态门面
 
 import type { ModelApi, UserMessage } from '../llm/types.ts';
-import type { ToolRegistry } from '../tools/types.ts';
+import { ToolRegistry, type ToolSource } from '../tools/types.ts';
 import {
   type AgentLoopHook,
   fireAgentLoopHooks,
@@ -14,7 +14,8 @@ import type { AgentContext, AgentEvent, AgentState } from './types.ts';
 
 export interface AgentOptions {
   modelApi?: ModelApi;
-  tools: ToolRegistry;
+  tools: ToolSource;
+  cwd?: string;
   skillSnapshot?: SkillSnapshot;
 }
 
@@ -26,13 +27,15 @@ export const UNCONFIGURED_MODEL_MESSAGE =
 // 脱离 AgentSession 单独使用 Agent 时不会产出系统提示词
 export class Agent {
   private readonly _state: AgentState;
-  private readonly _tools: ToolRegistry;
+  private readonly _tools: ToolSource;
+  private runTools: ToolRegistry | undefined;
   private readonly _hooks: AgentLoopHook[] = [];
   // 系统提示词装配器：生命周期与 Agent 一致，construction 节只求值一次。
   // 系统消息不随构造写入历史：每次 run / 请求前由刷新钩子按需追加，
   // 恢复的老会话也能借此感知工具与扩展的变化
   readonly systemPrompt: SystemPromptAssembler;
   readonly skillSnapshot: SkillSnapshot;
+  readonly cwd: string;
 
   private readonly _listeners = new Set<
     (event: AgentEvent, signal?: AbortSignal) => Promise<void> | void
@@ -41,9 +44,11 @@ export class Agent {
   constructor({
     modelApi,
     tools,
+    cwd = process.cwd(),
     skillSnapshot = { skills: [], warnings: [] },
   }: AgentOptions) {
     this._tools = tools;
+    this.cwd = cwd;
     this.skillSnapshot = skillSnapshot;
     this._state = {
       messages: [],
@@ -52,7 +57,7 @@ export class Agent {
     this.systemPrompt = new SystemPromptAssembler(
       {
         tools,
-        cwd: process.cwd(),
+        cwd,
       },
       [
         {
@@ -80,6 +85,8 @@ export class Agent {
   // 每次 run 开始、用户消息进入历史与落盘之前触发：
   // 钩子里追加的系统消息在生产顺序上排在本次用户消息之前
   async prepareRun(signal?: AbortSignal): Promise<void> {
+    this.runTools = undefined;
+    this.captureTools();
     await fireAgentLoopHooks(
       this._hooks,
       'prepareRun',
@@ -91,6 +98,10 @@ export class Agent {
     return this._state;
   }
 
+  get toolSnapshot(): ToolSource {
+    return this.runTools ?? this._tools;
+  }
+
   async prompt(
     input: UserMessage,
     { signal }: { signal?: AbortSignal } = {},
@@ -99,20 +110,36 @@ export class Agent {
       // 配置问题不是生成失败，直接抛出，不走 run_end 事件
       throw new Error(UNCONFIGURED_MODEL_MESSAGE);
     }
+    this.captureTools();
     const context: AgentContext = {
-      tools: this._tools,
+      tools: this.toolSnapshot,
+      cwd: this.cwd,
       messages: this._state.messages,
     };
-    const newMessages = await runAgentLoop(
-      input,
-      context,
-      async event => this._onEvent(event, signal),
-      this._state.modelApi,
-      signal,
-      { hooks: this._hooks },
-    );
+    try {
+      const newMessages = await runAgentLoop(
+        input,
+        context,
+        async event => this._onEvent(event, signal),
+        this._state.modelApi,
+        signal,
+        { hooks: this._hooks },
+      );
+      this._state.messages.push(...newMessages);
+    } finally {
+      this.runTools = undefined;
+    }
+  }
 
-    this._state.messages.push(...newMessages);
+  private captureTools(): void {
+    if (this.runTools !== undefined) {
+      return;
+    }
+    const snapshot = new ToolRegistry();
+    for (const tool of this._tools.list()) {
+      snapshot.register(tool);
+    }
+    this.runTools = snapshot;
   }
 
   private async _onEvent(

@@ -19,6 +19,7 @@ const data: StatusBarData = {
   cwd: '/Users/Random/codespace/bubble-code',
   homeDir: '/Users/Random',
   branch: 'main',
+  mcp: undefined,
   context: { used: 128_005, window: 256_000 },
   cache: { read: 96_000, promptTokens: 128_000 },
 };
@@ -95,6 +96,23 @@ test('default style renders model first, then cwd, branch, context, cache', () =
 test('nerdfont style replaces labels with icons', () => {
   expect(renderPlain(data, 'nerdfont', 200)).toBe(
     ' \u{F2DB} kimi-code/k3 (high) │ \u{F07B} ~/codespace/bubble-code │ \u{E0A0} main │ \u{F1C0} 128K/256K (50%) │ \u{F0E7} 96K (75%)',
+  );
+});
+
+test('renders MCP connection counts with status symbols', () => {
+  const withMcp: StatusBarData = {
+    ...data,
+    mcp: { connected: 2, connecting: 1, failed: 3 },
+  };
+  const line = renderPlain(withMcp, 'default', 200);
+  expect(line).toContain('MCP ✓ 2  ◌ 1  ✗ 3');
+  expect(line.indexOf('上下文')).toBeLessThan(line.indexOf('MCP'));
+  expect(line.indexOf('MCP')).toBeLessThan(line.indexOf('缓存'));
+  expect(renderPlain(withMcp, 'nerdfont', 200)).toContain(
+    '\u{F1E6} ✓ 2  ◌ 1  ✗ 3',
+  );
+  expect(renderPlain(withMcp, 'powerline', 200)).toContain(
+    '\u{F1E6} ✓ 2  ◌ 1  ✗ 3',
   );
 });
 

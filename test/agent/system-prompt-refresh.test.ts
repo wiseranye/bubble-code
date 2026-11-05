@@ -365,15 +365,14 @@ test('registering a tool between runs appends a new system message; only the lat
   expect(stored.length).toBe(2);
 });
 
-test('a mid-run change is picked up before the next request of the same run', async () => {
+test('a mid-run tool change is deferred to the next run', async () => {
   const registry = echoRegistry();
   const model = new CapturingModel([
     { text: '先看看', toolCalls: [{ id: 'call-1', name: 'echo', input: {} }] },
     { text: '完成' },
+    { text: '下一轮' },
   ]);
   const agent = new Agent({ modelApi: model, tools: registry });
-  // 在第二个 turn 前注册新工具：模拟扩展在 run 中途接入。
-  // 先于会话的内置钩子注册，保证刷新能看到这次变化
   let injected = false;
   agent.registerHook({
     prepareTurn: context => {
@@ -391,27 +390,20 @@ test('a mid-run change is picked up before the next request of the same run', as
   session.prompt('跑一下');
   await until(() => !session.isStreaming);
 
-  // 存储：第二条系统消息按生产顺序排在 tool_result 之后
-  expect(agent.state.messages.map(message => message.role)).toEqual([
-    'system',
-    'user',
-    'assistant',
-    'tool_result',
-    'system',
-    'assistant',
-  ]);
-
-  // 第一次请求用的是构造时的系统消息；第二次请求只有刷新后的那一条
-  expect(model.requests.length).toBe(2);
-  const firstSystem = model.requests[0]?.[0];
+  expect(systemMessages(agent.state.messages)).toHaveLength(1);
+  expect(model.requests).toHaveLength(2);
   expect(
-    firstSystem?.role === 'system' && !firstSystem.content.includes('midrun'),
+    model.requests[1]?.[0]?.role === 'system' &&
+      !model.requests[1][0].content.includes('midrun'),
   ).toBe(true);
-  const second = model.requests[1];
-  expect(systemMessages(second ?? []).length).toBe(1);
+
+  session.prompt('下一句');
+  await until(() => !session.isStreaming);
+  expect(systemMessages(agent.state.messages)).toHaveLength(2);
+  const third = model.requests[2];
   expect(
-    second?.[0]?.role === 'system' &&
-      second[0].content.includes('- midrun: midrun'),
+    third?.[0]?.role === 'system' &&
+      third[0].content.includes('- midrun: midrun'),
   ).toBe(true);
 });
 
@@ -650,20 +642,6 @@ test('mid-run compaction prunes the status bar run order and keeps only the late
     { text: '完成。' },
   ]);
   const agent = new Agent({ modelApi: model, tools: registry });
-  // 在第二个 turn 前注册新工具，让提示词刷新与循环内压缩发生在同一次 prepareTurn。
-  // 先于会话的内置钩子注册，保证刷新能看到这次变化
-  let injected = false;
-  agent.registerHook({
-    prepareTurn: context => {
-      if (
-        !injected &&
-        context.messages.some(message => message.role === 'tool_result')
-      ) {
-        injected = true;
-        registry.register(defineExtraTool('midrun'));
-      }
-    },
-  });
   // 小 contextWindow + 小保留比例：第一个 turn 可摘要区间为空（静默跳过），
   // 第二个 turn 才能压出非空区间
   const session = openSession(agent, undefined, {
@@ -682,7 +660,7 @@ test('mid-run compaction prunes the status bar run order and keeps only the late
   session.prompt('U'.repeat(4000));
   await until(() => !session.isStreaming);
 
-  // 投影：sys0 与 4000 字符的用户消息被摘要，只剩 sys1（含 midrun）与保留区间
+  // 投影：4000 字符的用户消息被摘要，保留当前 Run 的系统提示词与保留区间
   expect(agent.state.messages.map(message => message.role)).toEqual([
     'user',
     'assistant',
@@ -690,27 +668,17 @@ test('mid-run compaction prunes the status bar run order and keeps only the late
     'system',
     'assistant',
   ]);
-  const systems = systemMessages(agent.state.messages);
-  expect(systems.length).toBe(1);
-  expect(
-    systems[0]?.role === 'system' && systems[0].content.includes('midrun'),
-  ).toBe(true);
+  expect(systemMessages(agent.state.messages)).toHaveLength(1);
 
-  // 三次请求：首轮带构造时的系统消息；摘要侧信道不带系统消息；
+  // 三次请求：首轮带系统消息；摘要侧信道不带系统消息；
   // 压缩后的请求只有最新系统消息且在开头
   expect(model.requests.length).toBe(3);
-  const firstSystem = model.requests[0]?.[0];
-  expect(
-    firstSystem?.role === 'system' && !firstSystem.content.includes('midrun'),
-  ).toBe(true);
   expect(model.requests[1]?.every(message => message.role !== 'system')).toBe(
     true,
   );
   const third = model.requests[2];
   expect(systemMessages(third ?? []).length).toBe(1);
-  expect(
-    third?.[0]?.role === 'system' && third[0].content.includes('midrun'),
-  ).toBe(true);
+  expect(third?.[0]?.role).toBe('system');
 
   // 状态栏：压缩前峰值包含 4000 字符的用户消息；压缩后它被摘要，
   // 用量必须回落（currentRunOrder 已剔除被摘要的本轮消息）
@@ -720,7 +688,7 @@ test('mid-run compaction prunes the status bar run order and keeps only the late
   expect(peak).toBeGreaterThan(2000);
   expect(final).toBeLessThan(peak);
 
-  // 落盘：两条系统消息按生产顺序保留，压缩条目在第二条系统消息与最后一条 assistant 之间
+  // 落盘：压缩条目在工具结果与最后一条 assistant 之间
   await session.dispose();
   const entries = readSessionEntries();
   const sequence = entries.flatMap(entry => {
@@ -737,7 +705,6 @@ test('mid-run compaction prunes the status bar run order and keeps only the late
     'user',
     'assistant',
     'tool_result',
-    'system',
     'compaction',
     'assistant',
   ]);
