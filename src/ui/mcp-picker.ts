@@ -11,19 +11,30 @@ import { selectListTheme, style } from './theme.ts';
 const maxVisibleEntries = 8;
 
 export class McpPicker implements Component {
-  private readonly byKey: ReadonlyMap<string, McpConnection>;
-  private readonly list: SelectList;
+  private byKey: ReadonlyMap<string, McpConnection>;
+  private list: SelectList;
+  private readonly getEntries: () => readonly McpConnection[];
+  private readonly onCancel: () => void;
   private readonly onChange: () => void;
+  private entriesSnapshot: string;
   private expandedKey: string | undefined;
 
   constructor(
-    entries: readonly McpConnection[],
+    getEntries: () => readonly McpConnection[],
     onCancel: () => void,
     onChange: () => void,
   ) {
-    this.byKey = new Map(entries.map(entry => [connectionKey(entry), entry]));
+    this.getEntries = getEntries;
+    this.onCancel = onCancel;
     this.onChange = onChange;
-    this.list = new SelectList(
+    const entries = getEntries();
+    this.entriesSnapshot = JSON.stringify(entries);
+    this.byKey = new Map(entries.map(entry => [connectionKey(entry), entry]));
+    this.list = this.createList(entries);
+  }
+
+  private createList(entries: readonly McpConnection[]): SelectList {
+    const list = new SelectList(
       entries.map(entry => ({
         value: connectionKey(entry),
         label: `${statusIcon(entry)} ${entry.serverName}`,
@@ -32,7 +43,7 @@ export class McpPicker implements Component {
       Math.max(1, Math.min(maxVisibleEntries, entries.length)),
       selectListTheme,
     );
-    this.list.onSelect = item => {
+    list.onSelect = item => {
       const entry = this.byKey.get(item.value);
       if (entry?.status !== 'connected') {
         return;
@@ -41,20 +52,53 @@ export class McpPicker implements Component {
         this.expandedKey === item.value ? undefined : item.value;
       this.onChange();
     };
-    this.list.onSelectionChange = item => {
+    list.onSelectionChange = item => {
       if (this.expandedKey !== undefined && this.expandedKey !== item.value) {
         this.expandedKey = undefined;
         this.onChange();
       }
     };
-    this.list.onCancel = onCancel;
+    list.onCancel = this.onCancel;
+    return list;
+  }
+
+  private refresh(): void {
+    const entries = this.getEntries();
+    const snapshot = JSON.stringify(entries);
+    if (snapshot === this.entriesSnapshot) {
+      return;
+    }
+
+    const selectedKey = this.list.getSelectedItem()?.value;
+    this.entriesSnapshot = snapshot;
+    this.byKey = new Map(entries.map(entry => [connectionKey(entry), entry]));
+    this.list = this.createList(entries);
+    const selectedIndex = entries.findIndex(
+      entry => connectionKey(entry) === selectedKey,
+    );
+    if (selectedIndex >= 0) {
+      this.list.setSelectedIndex(selectedIndex);
+    }
+
+    const expandedEntry =
+      this.expandedKey === undefined
+        ? undefined
+        : this.byKey.get(this.expandedKey);
+    if (
+      expandedEntry?.status !== 'connected' ||
+      this.list.getSelectedItem()?.value !== this.expandedKey
+    ) {
+      this.expandedKey = undefined;
+    }
   }
 
   handleInput(data: string): void {
+    this.refresh();
     this.list.handleInput(data);
   }
 
   handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+    this.refresh();
     return this.list.handleMouse({ ...event, y: event.y - 1 });
   }
 
@@ -63,6 +107,7 @@ export class McpPicker implements Component {
   }
 
   render(width: number): string[] {
+    this.refresh();
     const lines = [
       style.dim('MCP 连接 · Enter 展开/收起工具 · Esc 关闭'),
       ...this.list.render(width),

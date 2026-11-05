@@ -341,7 +341,9 @@ export function createChatApp(
       overlay?.hide();
       overlay = undefined;
     };
-    const picker = new McpPicker(connections, close, () => tui.requestRender());
+    const picker = new McpPicker(getMcpConnections, close, () =>
+      tui.requestRender(),
+    );
     overlay = tui.showOverlay(picker, {
       width: '70%',
       maxHeight: 20,

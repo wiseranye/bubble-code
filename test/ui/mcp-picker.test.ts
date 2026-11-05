@@ -30,7 +30,7 @@ function render(picker: McpPicker): string {
 
 test('shows all MCP connections and expands tools for a connected server', () => {
   const picker = new McpPicker(
-    entries,
+    () => entries,
     () => {},
     () => {},
   );
@@ -53,7 +53,7 @@ test('shows all MCP connections and expands tools for a connected server', () =>
 
 test('failed servers show the error and cannot expand tools', () => {
   const picker = new McpPicker(
-    entries,
+    () => entries,
     () => {},
     () => {},
   );
@@ -63,4 +63,29 @@ test('failed servers show the error and cannot expand tools', () => {
   const line = render(picker);
   expect(line).toContain('失败原因：boom');
   expect(line).not.toContain('工具列表');
+});
+
+test('refreshes asynchronous connection changes without reopening', () => {
+  const currentEntries: McpConnection[] = [
+    {
+      serverName: 'local',
+      cwd: '/work/project',
+      status: 'connecting',
+      tools: [],
+    },
+  ];
+  const picker = new McpPicker(
+    () => currentEntries,
+    () => {},
+    () => {},
+  );
+  expect(render(picker)).toContain('连接中');
+
+  currentEntries[0]!.status = 'connected';
+  currentEntries[0]!.tools = [
+    { name: 'mcp__local__search', description: 'Search' },
+  ];
+  expect(render(picker)).toContain('已连接');
+  picker.handleInput('\r');
+  expect(render(picker)).toContain('mcp__local__search');
 });

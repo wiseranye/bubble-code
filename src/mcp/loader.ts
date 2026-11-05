@@ -110,7 +110,10 @@ function redactSecrets(text: string, config: McpServerConfig): string {
       ? Object.values(config.headers)
       : Object.values(config.env);
   let redacted = text;
-  for (const value of values.filter(value => value !== '')) {
+  const sortedValues = values
+    .filter(value => value !== '')
+    .sort((left, right) => right.length - left.length);
+  for (const value of sortedValues) {
     redacted = redacted.replaceAll(value, '[redacted]');
   }
   return redacted;
