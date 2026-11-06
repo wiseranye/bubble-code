@@ -83,6 +83,8 @@ type ScriptTurn = {
 // 按剧本逐轮回放，并记录每次 stream 实际收到的消息列表（用来验证发送视图）
 class CapturingModel implements ModelApi {
   readonly requests: AgentMessage[][] = [];
+  // 每次 stream 实际收到的工具名：用来核对提示词的工具节与 tools 参数是否一致
+  readonly toolNames: string[][] = [];
   private index = 0;
   private readonly script: ScriptTurn[];
 
@@ -92,9 +94,10 @@ class CapturingModel implements ModelApi {
 
   stream(
     messages: AgentMessage[],
-    _options?: StreamOptions,
+    options?: StreamOptions,
   ): AssistantMessageEventStream {
     this.requests.push([...messages]);
+    this.toolNames.push((options?.tools ?? []).map(tool => tool.name));
     const stream = new AssistantMessageEventStream();
     const turn = this.script[this.index++] ?? { text: '' };
     const output: AssistantMessage = {
@@ -405,6 +408,50 @@ test('a mid-run tool change is deferred to the next run', async () => {
     third?.[0]?.role === 'system' &&
       third[0].content.includes('- midrun: midrun'),
   ).toBe(true);
+});
+
+test('系统提示词的工具节与 tools 参数同源：Run 中途就绪的工具只从下一个 Run 起出现', async () => {
+  const registry = new ToolRegistry();
+  registry.register(
+    defineTool({
+      name: 'echo',
+      description: 'echo',
+      inputSchema: z.object({}),
+      async execute() {
+        // 模拟 MCP 服务器在工具执行期间加载完成：实时来源变了，Run 快照不变
+        registry.register(defineExtraTool('midrun'));
+        return { success: true, output: 'ok' };
+      },
+    }),
+  );
+  const model = new CapturingModel([
+    { text: '先看看', toolCalls: [{ id: 'call-1', name: 'echo', input: {} }] },
+    { text: '完成' },
+    { text: '下一轮' },
+  ]);
+  const agent = new Agent({ modelApi: model, tools: registry });
+  const session = openSession(agent);
+
+  session.prompt('跑一下');
+  await until(() => !session.isStreaming);
+
+  // 第二个 turn：快照里没有 midrun，提示词与 tools 参数都不能提到它
+  const secondSystem = model.requests[1]?.[0];
+  expect(
+    secondSystem?.role === 'system' && secondSystem.content.includes('midrun'),
+  ).toBe(false);
+  expect(model.toolNames[1]).toEqual(['echo']);
+
+  session.prompt('下一句');
+  await until(() => !session.isStreaming);
+
+  // 下一个 Run：快照重拍，两者同时包含 midrun
+  const thirdSystem = model.requests[2]?.[0];
+  expect(
+    thirdSystem?.role === 'system' &&
+      thirdSystem.content.includes('- midrun: midrun'),
+  ).toBe(true);
+  expect(model.toolNames[2]).toEqual(['echo', 'midrun']);
 });
 
 test('resume of an old-format session appends a fresh system message on the first prompt', async () => {
