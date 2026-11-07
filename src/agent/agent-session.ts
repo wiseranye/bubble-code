@@ -59,12 +59,24 @@ export type AgentSessionEvent =
   // prompt 提交、每轮 turn 结束、整次 run 结束时发出；UI 用它异步刷新 Git 分支
   | { type: 'status_refresh' };
 
+// 命中率 = read / promptTokens；promptTokens 含 input、cacheRead 与 cacheWrite
+export type CacheUsage = {
+  read: number;
+  promptTokens: number;
+};
+
+export type SessionCacheStats = {
+  // 会话累计：对所有带 usage 的 assistant 消息求和
+  overall: CacheUsage;
+  // 最近一轮：最后一条带 usage 的 assistant 消息
+  last: CacheUsage;
+};
+
 export type SessionContextStats = {
   usedTokens: number;
   contextWindow: number;
-  cacheRead: number | undefined;
-  cacheWrite: number | undefined;
-  promptTokens: number | undefined;
+  // 提供方从未上报缓存命中时为 undefined
+  cache: SessionCacheStats | undefined;
 };
 
 type Listener = (event: AgentSessionEvent) => void;
@@ -309,7 +321,7 @@ export class AgentSession {
     return this.compacting;
   }
 
-  // 状态栏用的上下文统计：已用 token 与自动压缩同口径，缓存数据取最近一条 usage
+  // 状态栏用的上下文统计：已用 token 与自动压缩同口径，缓存数据同时给出会话累计与最近一轮
   get contextStats(): SessionContextStats {
     // agent.state 在 run 结束前不含本轮新增消息；把顺序副本拼在后面。
     // known 防的是 state 已合并、finally 还没清空顺序副本的短暂窗口
@@ -322,24 +334,38 @@ export class AgentSession {
       }
     }
 
-    let usage: Usage | undefined;
-    for (let index = messages.length - 1; index >= 0; index--) {
-      const message = messages[index];
-      if (message?.role === 'assistant' && message.usage !== undefined) {
-        usage = message.usage;
-        break;
+    let lastUsage: Usage | undefined;
+    let overallRead = 0;
+    let overallPromptTokens = 0;
+    let cacheReported = false;
+    for (const message of messages) {
+      if (message.role !== 'assistant' || message.usage === undefined) {
+        continue;
+      }
+
+      const usage = message.usage;
+      lastUsage = usage;
+      overallRead += usage.cacheRead;
+      overallPromptTokens += usage.input + usage.cacheRead + usage.cacheWrite;
+      if (usage.cacheRead + usage.cacheWrite > 0) {
+        cacheReported = true;
       }
     }
 
     return {
       usedTokens: estimateContextTokens(projectSendView(messages)),
       contextWindow: this.compactConfig.contextWindow,
-      cacheRead: usage?.cacheRead,
-      cacheWrite: usage?.cacheWrite,
-      promptTokens:
-        usage === undefined
+      cache:
+        lastUsage === undefined || !cacheReported
           ? undefined
-          : usage.input + usage.cacheRead + usage.cacheWrite,
+          : {
+              overall: { read: overallRead, promptTokens: overallPromptTokens },
+              last: {
+                read: lastUsage.cacheRead,
+                promptTokens:
+                  lastUsage.input + lastUsage.cacheRead + lastUsage.cacheWrite,
+              },
+            },
     };
   }
 

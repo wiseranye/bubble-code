@@ -15,13 +15,16 @@ import {
 chalk.level = 1;
 
 const data: StatusBarData = {
-  model: { label: 'kimi-code/k3', reasoning: 'high' },
+  model: { label: 'kimi-k2-0905', reasoning: 'high' },
   cwd: '/Users/Random/codespace/bubble-code',
   homeDir: '/Users/Random',
   branch: 'main',
   mcp: undefined,
   context: { used: 128_005, window: 256_000 },
-  cache: { read: 96_000, promptTokens: 128_000 },
+  cache: {
+    overall: { read: 96_000, promptTokens: 128_000 },
+    last: { read: 64_000, promptTokens: 64_000 },
+  },
 };
 
 function render(
@@ -89,13 +92,13 @@ test('basenameOf keeps the last path component', () => {
 
 test('default style renders model first, then cwd, branch, context, cache', () => {
   expect(renderPlain(data, 'default', 200)).toBe(
-    ' kimi-code/k3 (high) │ ~/codespace/bubble-code │ main │ 上下文 128K/256K (50%) │ 缓存 96K (75%)',
+    ' kimi-k2-0905 (high) │ ~/codespace/bubble-code │ main │ 上下文 128K/256K (50%) │ 缓存 75% (上轮 100%)',
   );
 });
 
 test('nerdfont style replaces labels with icons', () => {
   expect(renderPlain(data, 'nerdfont', 200)).toBe(
-    ' \u{F2DB} kimi-code/k3 (high) \u{F105} \u{F115} ~/codespace/bubble-code \u{F105} \u{F418} main \u{F105} \u{F1C0} 128K/256K (50%) \u{F105} \u{F0E7} 96K (75%)',
+    ' \u{F2DB} kimi-k2-0905 (high) \u{F105} \u{F115} ~/codespace/bubble-code \u{F105} \u{F418} main \u{F105} \u{F1C0} 128K/256K (50%) \u{F105} \u{F0E7} 75% (\u{F0E2} 100%)',
   );
 });
 
@@ -141,7 +144,7 @@ test('all styles color text without background colors', () => {
     const line = render(data, style, 200);
     expect(line).toContain('\x1b[');
     expect(hasBackgroundColor(line)).toBe(false);
-    expect(stripTerminalSequences(line)).toContain('kimi-code/k3');
+    expect(stripTerminalSequences(line)).toContain('kimi-k2-0905');
   }
 });
 
@@ -166,11 +169,11 @@ test('powerline style uses separators without background colors', () => {
 
   expect(hasBackgroundColor(line)).toBe(false);
   expect(visibleWidth(line)).toBeLessThanOrEqual(200);
-  expect(plain).toContain('kimi-code/k3 (high)');
+  expect(plain).toContain('kimi-k2-0905 (high)');
   expect(plain).toContain('~/codespace/bubble-code');
   expect(plain).toContain('main');
   expect(plain).toContain('128K/256K (50%)');
-  expect(plain).toContain('96K (75%)');
+  expect(plain).toContain('75% (\u{F0E2} 100%)');
   expect(plain).not.toContain('上下文');
   expect(plain).not.toContain('缓存');
 });
@@ -193,7 +196,7 @@ test('cwd degrades to the last component before being removed', () => {
   const line = renderPlain(data, 'default', 40);
   expect(line).toContain('bubble-code');
   expect(line).not.toContain('~/codespace');
-  expect(line).toContain('kimi-code/k3');
+  expect(line).toContain('kimi-k2-0905');
 });
 
 test('the line is hidden when no block fits', () => {

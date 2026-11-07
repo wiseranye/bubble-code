@@ -1,5 +1,6 @@
 import { type Component, visibleWidth } from '@earendil-works/pi-tui';
 import chalk from 'chalk';
+import type { SessionCacheStats } from '../agent/agent-session.ts';
 import type { McpStatus } from '../mcp/manager.ts';
 import type { StatusBarStyle } from '../setting-manager.ts';
 import { style as themeStyle } from './theme.ts';
@@ -13,7 +14,7 @@ export type StatusBarData = {
   branch: string | undefined;
   mcp: McpStatus | undefined;
   context: { used: number; window: number } | undefined;
-  cache: { read: number; promptTokens: number } | undefined;
+  cache: SessionCacheStats | undefined;
 };
 
 type BlockKey = 'model' | 'cwd' | 'branch' | 'mcp' | 'context' | 'cache';
@@ -43,6 +44,9 @@ const icons: Record<BlockKey, string> = {
   context: '\u{F1C0}',
   cache: '\u{F0E7}',
 };
+
+// 缓存块括号里是上一轮的命中率，用 rotate-left（回退一步）与总体命中率区分
+const lastTurnIcon = '\u{F0E2}';
 
 // 只用前景色：终端背景色块太抢眼
 const segmentColors: Record<BlockKey, SegmentColor> = {
@@ -207,9 +211,13 @@ function buildBlocks(data: StatusBarData, barStyle: StatusBarStyle): Block[] {
   }
 
   if (data.cache !== undefined) {
-    const cache = `${formatTokens(data.cache.read)} (${formatPercent(
-      data.cache.read,
-      data.cache.promptTokens,
+    const lastTurn = decorated ? `${lastTurnIcon} ` : '上轮 ';
+    const cache = `${formatPercent(
+      data.cache.overall.read,
+      data.cache.overall.promptTokens,
+    )} (${lastTurn}${formatPercent(
+      data.cache.last.read,
+      data.cache.last.promptTokens,
     )})`;
     blocks.push(makeBlock('cache', cache, decorated));
   }

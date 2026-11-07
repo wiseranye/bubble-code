@@ -112,22 +112,13 @@ export function createChatApp(
   const getStatusData = (): StatusBarData => {
     const choice = catalog.current;
     const stats = session.contextStats;
-    const cacheRead = stats.cacheRead;
-    const cacheWrite = stats.cacheWrite;
-    const cache: StatusBarData['cache'] =
-      choice !== undefined &&
-      cacheRead !== undefined &&
-      cacheWrite !== undefined &&
-      cacheRead + cacheWrite > 0
-        ? { read: cacheRead, promptTokens: stats.promptTokens ?? 0 }
-        : undefined;
 
     return {
       model:
         choice === undefined
           ? undefined
           : {
-              label: `${choice.provider.name}/${choice.model.name ?? choice.model.id}`,
+              label: choice.model.name ?? choice.model.id,
               reasoning: choice.model.reasoning,
             },
       cwd: session.cwd,
@@ -138,7 +129,7 @@ export function createChatApp(
         choice === undefined
           ? undefined
           : { used: stats.usedTokens, window: stats.contextWindow },
-      cache,
+      cache: choice === undefined ? undefined : stats.cache,
     };
   };
 

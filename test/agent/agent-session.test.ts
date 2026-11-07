@@ -223,9 +223,11 @@ test('contextStats anchors on the latest usage and emits status refreshes', asyn
   const stats = session.contextStats;
   expect(stats.usedTokens).toBe(5000);
   expect(stats.contextWindow).toBe(256_000);
-  expect(stats.cacheRead).toBe(3000);
-  expect(stats.cacheWrite).toBe(500);
-  expect(stats.promptTokens).toBe(4500);
+  // 只有一轮：累计与上一轮相同
+  expect(stats.cache).toEqual({
+    overall: { read: 3000, promptTokens: 4500 },
+    last: { read: 3000, promptTokens: 4500 },
+  });
 
   // 提交时、turn_end、run_end 各一次
   expect(events.filter(event => event.type === 'status_refresh').length).toBe(
@@ -279,9 +281,31 @@ test('contextStats has no cache data before the first response', () => {
   // 首个 run 之前还没有任何协议消息：系统消息在 prepareRun 刷新时才产生
   expect(stats.usedTokens).toBe(0);
   expect(stats.contextWindow).toBe(256_000);
-  expect(stats.cacheRead).toBeUndefined();
-  expect(stats.cacheWrite).toBeUndefined();
-  expect(stats.promptTokens).toBeUndefined();
+  expect(stats.cache).toBeUndefined();
+});
+
+test('contextStats sums the overall cache rate across turns', async () => {
+  const model = new ScriptedModel([
+    { text: '第一轮', usage: { ...testUsage, cacheWrite: 0 } },
+    {
+      text: '第二轮',
+      usage: { ...testUsage, input: 500, cacheRead: 4300, cacheWrite: 200 },
+    },
+  ]);
+  const session = openSession(
+    new Agent({ modelApi: model, tools: new ToolRegistry() }),
+  );
+
+  session.prompt('第一问');
+  await until(() => !session.isStreaming);
+  session.prompt('第二问');
+  await until(() => !session.isStreaming);
+
+  const cache = session.contextStats.cache;
+  // 累计 read = 3000 + 4300；累计 prompt = (1000+3000) + (500+4300+200)
+  expect(cache?.overall).toEqual({ read: 7300, promptTokens: 9000 });
+  // 上一轮只看最后一条 usage
+  expect(cache?.last).toEqual({ read: 4300, promptTokens: 5000 });
 });
 
 test('running a tool creates a tool message that is updated and sealed', async () => {
