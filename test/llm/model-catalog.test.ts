@@ -7,6 +7,7 @@ const settings: Settings = {
   statusBar: { enable: true, style: 'default' },
   compactThreshold: 0.8,
   compactRetainRatio: 0.16,
+  maxConcurrentToolCalls: 10,
   providers: [
     {
       name: 'alpha',
@@ -49,6 +50,7 @@ test('empty providers yield no choices and no current', () => {
     statusBar: { enable: true, style: 'default' },
     compactThreshold: 0.8,
     compactRetainRatio: 0.16,
+    maxConcurrentToolCalls: 10,
     providers: [],
   });
 

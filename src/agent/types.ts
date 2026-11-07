@@ -30,7 +30,8 @@ export type AgentEvent =
   | { type: 'text_end'; text: Text }
   | { type: 'thinking_delta'; delta: string }
   | { type: 'thinking_end'; thinking: Thinking }
-  // 单个工具调用
+  // 单个工具调用：完整接收时排队，获得执行槽位时开始
+  | { type: 'tool_queued'; toolCall: ToolCall }
   | { type: 'tool_start'; toolCall: ToolCall }
   | {
       type: 'tool_result';

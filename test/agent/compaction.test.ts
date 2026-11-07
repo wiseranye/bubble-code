@@ -302,6 +302,7 @@ function echoRegistry(): ToolRegistry {
       name: 'echo',
       description: 'echo',
       inputSchema: z.object({ value: z.string() }),
+      isConcurrencySafe: () => false,
       async execute(input: Record<string, unknown>) {
         // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
         return { success: true, output: `ok: ${String(input['value'])}` };

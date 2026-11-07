@@ -470,6 +470,25 @@ test('the header press is handled without toggling', () => {
   expect(view.handleMouse({ ...clickAt(3), type: 'press' })).toBeUndefined();
 });
 
+test('a queued tool shows preparation before switching to running', () => {
+  const queued: ToolChatMessage = {
+    id: 22,
+    role: 'tool',
+    toolCallId: 'call-queued',
+    name: 'bash',
+    input: '{"command":"ls"}',
+    output: '',
+    status: 'queued',
+    success: true,
+  };
+  const view = toolView(queued);
+
+  expect(plain(view.render(40))).toEqual(['⚙ bash（正在准备调用…） → ls']);
+
+  view.update({ ...queued, status: 'running' });
+  expect(plain(view.render(40))).toEqual(['⚙ bash（执行中…） → ls']);
+});
+
 test('a failure update renders the error in red above the dimmed output', () => {
   const running: ToolChatMessage = {
     id: 5,

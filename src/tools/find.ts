@@ -111,6 +111,7 @@ export const findTool = defineTool({
   name: 'find',
   description: `Search for files by glob pattern. Returns matching file paths relative to the search directory. Respects ignore files and includes hidden files. Output is truncated to the requested result limit (default ${DEFAULT_LIMIT}) or ${formatSize(DEFAULT_MAX_BYTES)} (whichever is hit first).`,
   inputSchema: findInputSchema,
+  isConcurrencySafe: () => true,
   async execute(input: FindInput, context: ToolContext): Promise<ToolResult> {
     const parsed = findInputSchema.safeParse(input);
     if (!parsed.success) {

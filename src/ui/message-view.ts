@@ -307,7 +307,7 @@ export class ToolMessageView implements MessageView {
   private message: ToolChatMessage;
   private readonly renderer: ToolRenderer;
   private readonly onRenderRequest: () => void;
-  // 展开状态跨 update 保留：同一条消息从 running 变 done，不该把用户展开的正文又折回去
+  // 展开状态跨 update 保留：同一条消息从 queued/running 变 done，不该把用户展开的正文又折回去
   private expanded: boolean;
   // 折叠时正文最后一行是「… 还有 N 行，点击展开」提示，点它也能展开；没有提示时为 undefined
   private collapsedTipRow: number | undefined;
@@ -402,8 +402,12 @@ export class ToolMessageView implements MessageView {
     const displayName =
       this.renderer.displayName?.(state.input) ?? this.message.name;
     const name = style.toolName(displayName, failed);
-    const running =
-      state.status === 'running' ? style.running('（执行中…）') : '';
+    const activity =
+      state.status === 'queued'
+        ? style.running('（正在准备调用…）')
+        : state.status === 'running'
+          ? style.running('（执行中…）')
+          : '';
     const summary =
       this.renderer.summarise?.(state.input) ?? summariseToolInput(state.input);
     const summaryText = summary === '' ? '' : ` ${style.dim(`→ ${summary}`)}`;
@@ -412,7 +416,7 @@ export class ToolMessageView implements MessageView {
       ? ` ${style.dim(this.expanded ? '▾' : '▸')}`
       : '';
 
-    const head = `${mark} ${name}${running}${summaryText}`;
+    const head = `${mark} ${name}${activity}${summaryText}`;
     return (
       truncateToWidth(head, Math.max(1, inner - visibleWidth(indicator))) +
       indicator
@@ -440,8 +444,8 @@ export class ToolMessageView implements MessageView {
   private renderState(): ToolRenderState {
     const { message } = this;
     const input = parseToolInput(message.input);
-    if (message.status === 'running') {
-      return { status: 'running', input };
+    if (message.status === 'queued' || message.status === 'running') {
+      return { status: message.status, input };
     }
 
     return {

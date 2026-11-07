@@ -7,6 +7,7 @@ import type {
   UserMessage,
 } from '../llm/types.ts';
 import { projectSendView } from './send-view.ts';
+import { executeToolCallBatch, skipToolCallBatch } from './tool-call-batch.ts';
 import type { AgentContext, AgentEvent } from './types.ts';
 
 // run / turn 生命周期钩子。prepareRun 在每次 run 开始、用户消息进入历史之前触发；
@@ -31,6 +32,7 @@ export interface AgentLoopHook {
 
 export type AgentLoopOptions = {
   hooks?: readonly AgentLoopHook[];
+  maxConcurrentToolCalls?: number;
 };
 
 // 依次触发钩子；单个钩子失败只警告，不影响后续钩子与本次 run
@@ -214,9 +216,9 @@ async function runLoop(
           const { toolCall } = event;
           // 先只登记，等本轮结束后再执行
           waitingToolCalls.push(toolCall);
-          // 工具调用开始
+          // 完整调用立即进入 Transcript，但要等获得执行槽位后才变为 running
           await emit({
-            type: 'tool_start',
+            type: 'tool_queued',
             toolCall,
           });
           break;
@@ -230,11 +232,26 @@ async function runLoop(
         }
 
         case 'error': {
+          // 已完整接收的调用必须保留并补齐结果；尚未完整的流式调用不在批次内。
+          let toolResults: ToolResultMessage[] = [];
+          if (waitingToolCalls.length > 0) {
+            newMessages.push(event.message);
+            context.messages.push(event.message);
+            toolResults = await skipToolCallBatch(
+              waitingToolCalls,
+              event.reason === 'aborted'
+                ? 'user aborted'
+                : 'model response failed; tool call was not executed',
+              emit,
+            );
+            newMessages.push(...toolResults);
+            context.messages.push(...toolResults);
+          }
           // 本轮结束
           await emit({
             type: 'turn_end',
             message: event.message,
-            toolResults: [],
+            toolResults,
           });
           await emit({
             type: 'run_end',
@@ -265,57 +282,15 @@ async function runLoop(
       return newMessages;
     }
 
-    const toolResults: ToolResultMessage[] = [];
-
-    // 循环工具调用
-    for (const { id, name, input } of waitingToolCalls) {
-      // 中断后不再执行剩余的工具调用
-      if (signal?.aborted) {
-        break;
-      }
-      let output = '';
-      let error: string | undefined;
-      let metadata: Record<string, unknown> | undefined;
-      let success = false;
-      try {
-        // eslint-disable-next-line no-await-in-loop, unicorn/no-array-callback-reference -- 工具按顺序执行；ToolRegistry.find 不是 Array.find
-        const result = await context.tools
-          .find(name)
-          .execute(input, { cwd: context.cwd, signal });
-        success = result.success;
-        // error 和 output 分开保留；拼成模型可见文本的事在 llm 适配层做
-        output = result.output;
-        error = result.error;
-        metadata = result.metadata;
-      } catch (failure: unknown) {
-        // 工具不存在、或工具自己抛了，也要作为结果喂回去，模型才有机会纠正；
-        output = `工具执行失败：${
-          failure instanceof Error ? failure.message : String(failure)
-        }`;
-      }
-
-      const toolResultMessage: ToolResultMessage = {
-        role: 'tool_result',
-        toolName: name,
-        toolCallId: id,
-        output,
-        error,
-        metadata,
-        timestamp: Date.now(),
-      };
-      // 工具调用结果,暂时没有流式
-      // eslint-disable-next-line no-await-in-loop -- 事件必须按顺序发出
-      await emit({
-        type: 'tool_result',
-        toolCallId: id,
-        result: toolResultMessage,
-        success,
-      });
-      toolResults.push(toolResultMessage);
-      newMessages.push(toolResultMessage);
-      // 往消息列表中添加工具调用结果消息
-      context.messages.push(toolResultMessage);
-    }
+    const toolResults = await executeToolCallBatch(waitingToolCalls, {
+      context,
+      signal,
+      maxConcurrentCalls: options.maxConcurrentToolCalls ?? 10,
+      emit,
+    });
+    // 完成事件可以乱序，但协议历史、持久化与下一次模型输入保持声明顺序。
+    newMessages.push(...toolResults);
+    context.messages.push(...toolResults);
 
     // 本轮结束
     // eslint-disable-next-line no-await-in-loop -- 事件必须按顺序发出

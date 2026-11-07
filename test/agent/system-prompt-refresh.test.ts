@@ -160,6 +160,7 @@ function echoRegistry(): ToolRegistry {
       name: 'echo',
       description: 'echo',
       inputSchema: z.object({}),
+      isConcurrencySafe: () => false,
       async execute() {
         return { success: true, output: 'ok' };
       },
@@ -173,6 +174,7 @@ function defineExtraTool(name: string) {
     name,
     description: name,
     inputSchema: z.object({}),
+    isConcurrencySafe: () => false,
     async execute() {
       return { success: true, output: 'ok' };
     },
@@ -417,6 +419,7 @@ test('系统提示词的工具节与 tools 参数同源：Run 中途就绪的工
       name: 'echo',
       description: 'echo',
       inputSchema: z.object({}),
+      isConcurrencySafe: () => false,
       async execute() {
         // 模拟 MCP 服务器在工具执行期间加载完成：实时来源变了，Run 快照不变
         registry.register(defineExtraTool('midrun'));

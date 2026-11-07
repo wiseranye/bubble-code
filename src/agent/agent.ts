@@ -17,6 +17,7 @@ export interface AgentOptions {
   tools: ToolSource;
   cwd?: string;
   skillSnapshot?: SkillSnapshot;
+  maxConcurrentToolCalls?: number;
 }
 
 // 未配置模型时的提示：Agent.prompt 抛出，AgentSession 在落盘与触发钩子之前先做同样检查
@@ -30,6 +31,7 @@ export class Agent {
   private readonly _tools: ToolSource;
   private runTools: ToolRegistry | undefined;
   private readonly _hooks: AgentLoopHook[] = [];
+  private readonly maxConcurrentToolCalls: number;
   // 系统提示词装配器：生命周期与 Agent 一致，construction 节只求值一次。
   // 系统消息不随构造写入历史：每次 run / 请求前由刷新钩子按需追加，
   // 恢复的老会话也能借此感知工具与扩展的变化
@@ -46,9 +48,11 @@ export class Agent {
     tools,
     cwd = process.cwd(),
     skillSnapshot = { skills: [], warnings: [] },
+    maxConcurrentToolCalls = 10,
   }: AgentOptions) {
     this._tools = tools;
     this.cwd = cwd;
+    this.maxConcurrentToolCalls = maxConcurrentToolCalls;
     this.skillSnapshot = skillSnapshot;
     this._state = {
       messages: [],
@@ -123,7 +127,10 @@ export class Agent {
         async event => this._onEvent(event, signal),
         this._state.modelApi,
         signal,
-        { hooks: this._hooks },
+        {
+          hooks: this._hooks,
+          maxConcurrentToolCalls: this.maxConcurrentToolCalls,
+        },
       );
       this._state.messages.push(...newMessages);
     } finally {

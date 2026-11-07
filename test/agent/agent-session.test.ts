@@ -240,6 +240,7 @@ test('contextStats includes the in-flight run before the agent state is merged',
       name: 'echo',
       description: 'echo',
       inputSchema: z.object({}),
+      isConcurrencySafe: () => false,
       async execute() {
         return { success: true, output: 'ok' };
       },
@@ -290,6 +291,7 @@ test('running a tool creates a tool message that is updated and sealed', async (
       name: 'echo',
       description: 'echo',
       inputSchema: z.object({ value: z.string() }),
+      isConcurrencySafe: () => false,
       async execute(input: Record<string, unknown>) {
         // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
         return { success: true, output: `ok: ${String(input['value'])}` };
@@ -350,6 +352,7 @@ test('a failing tool keeps error and output separate', async () => {
       name: 'boom',
       description: 'boom',
       inputSchema: z.object({}),
+      isConcurrencySafe: () => false,
       async execute() {
         return { success: false, output: '部分输出', error: '命令失败' };
       },
@@ -406,6 +409,7 @@ test('tool result metadata is stored, persisted and reloaded', async () => {
         name: 'edit',
         description: 'edit',
         inputSchema: z.object({}),
+        isConcurrencySafe: () => false,
         async execute() {
           return {
             success: true,
@@ -676,6 +680,7 @@ test('session file writes assistant message before its tool results', async () =
         name: 'echo',
         description: 'echo',
         inputSchema: z.object({ value: z.string() }),
+        isConcurrencySafe: () => false,
         async execute(input: Record<string, unknown>) {
           // biome-ignore lint/complexity/useLiteralKeys: noPropertyAccessFromIndexSignature 要求索引签名用方括号
           return { success: true, output: `ok: ${String(input['value'])}` };
@@ -852,6 +857,79 @@ test('resume drops tool calls that have no matching tool result', () => {
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
+});
+
+test('abort preserves queued calls and sends their errors on the next prompt', async () => {
+  const model = new TerminalToolCallModel('aborted');
+  const agent = new Agent({ modelApi: model, tools: unusedToolRegistry() });
+  const session = openSession(agent);
+
+  session.prompt('开始');
+  await until(
+    () =>
+      session.messages.filter(message => message.role === 'tool').length === 2,
+  );
+  const queued = session.messages.filter(
+    (message): message is ToolChatMessage => message.role === 'tool',
+  );
+  expect(queued.every(message => message.status === 'queued')).toBe(true);
+
+  session.cancel();
+  await until(() => !session.isStreaming);
+
+  const completed = session.messages.filter(
+    (message): message is ToolChatMessage => message.role === 'tool',
+  );
+  expect(
+    completed.every(
+      message =>
+        message.status === 'done' &&
+        !message.success &&
+        message.error === 'user aborted',
+    ),
+  ).toBe(true);
+  const abortedResults = agent.state.messages.flatMap(message =>
+    message.role === 'tool_result' ? [message] : [],
+  );
+  expect(abortedResults).toHaveLength(2);
+  expect(abortedResults.every(result => result.error === 'user aborted')).toBe(
+    true,
+  );
+
+  session.prompt('继续');
+  await until(() => !session.isStreaming);
+  const nextResults = (model.requests[1] ?? []).flatMap(message =>
+    message.role === 'tool_result' ? [message] : [],
+  );
+  expect(nextResults).toHaveLength(2);
+  expect(nextResults.every(result => result.error === 'user aborted')).toBe(
+    true,
+  );
+});
+
+test('model failure preserves complete calls with not-executed errors', async () => {
+  const model = new TerminalToolCallModel('error');
+  const agent = new Agent({ modelApi: model, tools: unusedToolRegistry() });
+  const session = openSession(agent);
+
+  session.prompt('开始');
+  await until(() => !session.isStreaming);
+
+  const tools = session.messages.filter(
+    (message): message is ToolChatMessage => message.role === 'tool',
+  );
+  expect(tools).toHaveLength(2);
+  expect(
+    tools.every(
+      message =>
+        message.status === 'done' &&
+        !message.success &&
+        message.error === 'model response failed; tool call was not executed',
+    ),
+  ).toBe(true);
+  expect(
+    agent.state.messages.filter(message => message.role === 'tool_result'),
+  ).toHaveLength(2);
 });
 
 type ScriptTurn = {
@@ -1041,6 +1119,93 @@ class FailingModel implements ModelApi {
       message: output,
     });
     stream.end();
+    return stream;
+  }
+}
+
+function unusedToolRegistry(): ToolRegistry {
+  const registry = new ToolRegistry();
+  registry.register(
+    defineTool({
+      name: 'never',
+      description: 'must not execute',
+      inputSchema: z.object({}),
+      isConcurrencySafe: () => true,
+      async execute() {
+        throw new Error('tool should not execute');
+      },
+    }),
+  );
+  return registry;
+}
+
+// 第一轮完整产出两个调用后终止；第二轮记录请求并立即完成。
+class TerminalToolCallModel implements ModelApi {
+  readonly requests: AgentMessage[][] = [];
+  private readonly reason: 'aborted' | 'error';
+  private index = 0;
+
+  constructor(reason: 'aborted' | 'error') {
+    this.reason = reason;
+  }
+
+  stream(
+    messages: AgentMessage[],
+    options?: StreamOptions,
+  ): AssistantMessageEventStream {
+    this.requests.push([...messages]);
+    const stream = new AssistantMessageEventStream();
+    if (this.index++ > 0) {
+      const output: AssistantMessage = {
+        role: 'assistant',
+        content: [{ type: 'text', text: '继续了' }],
+        stopReason: 'stop',
+        timestamp: Date.now(),
+      };
+      stream.push({ type: 'start', partial: output });
+      stream.push({ type: 'done', reason: 'stop', message: output });
+      stream.end();
+      return stream;
+    }
+
+    const output: AssistantMessage = {
+      role: 'assistant',
+      content: [
+        { type: 'tool_call', id: 'call-a', name: 'never', input: {} },
+        { type: 'tool_call', id: 'call-b', name: 'never', input: {} },
+      ],
+      stopReason: 'tool_use',
+      timestamp: Date.now(),
+    };
+    stream.push({ type: 'start', partial: output });
+    for (const [index, block] of output.content.entries()) {
+      if (block.type === 'tool_call') {
+        stream.push({
+          type: 'tool_call_end',
+          index,
+          toolCall: block,
+          partial: output,
+        });
+      }
+    }
+
+    const finish = () => {
+      output.stopReason = this.reason;
+      stream.push({
+        type: 'error',
+        reason: this.reason,
+        error: new Error(this.reason === 'aborted' ? 'aborted' : 'boom'),
+        message: output,
+      });
+      stream.end();
+    };
+    if (this.reason === 'error') {
+      finish();
+    } else if (options?.signal?.aborted) {
+      finish();
+    } else {
+      options?.signal?.addEventListener('abort', finish, { once: true });
+    }
     return stream;
   }
 }

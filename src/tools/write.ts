@@ -12,6 +12,7 @@ export const writeTool = defineTool({
     "Write content to a file. Creates the file if it doesn't exist, overwrites if it does. Automatically creates parent directories.",
   inputSchema: writeInputSchema,
   render: writeRenderer,
+  isConcurrencySafe: () => false,
   async execute(input: WriteInput, ctx: ToolContext): Promise<ToolResult> {
     if (ctx.signal?.aborted) {
       return { success: false, output: '', error: 'operation aborted' };

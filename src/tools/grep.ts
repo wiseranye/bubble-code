@@ -374,6 +374,7 @@ export const grepTool = defineTool({
   name: 'grep',
   description: `Search file contents with a Rust regular expression. Returns matching lines as path:line:content and context lines as path-line-content. Results are sorted by path and line, limited to ${DEFAULT_LIMIT} matching lines by default, and truncated at ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB.`,
   inputSchema: grepInputSchema,
+  isConcurrencySafe: () => true,
   async execute(input: GrepInput, context: ToolContext): Promise<ToolResult> {
     const parsed = grepInputSchema.safeParse(input);
     if (!parsed.success) {

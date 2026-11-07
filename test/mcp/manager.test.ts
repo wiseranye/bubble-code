@@ -18,6 +18,7 @@ function loadedTool(name = 'mcp__local__search'): AnyTool {
     name,
     description: 'search',
     inputSchema: { type: 'object' },
+    isConcurrencySafe: () => true,
     async execute() {
       return { success: true, output: 'ok' };
     },

@@ -91,6 +91,8 @@ const settingsSchema = z
     compactThreshold: z.number().min(0).max(1).default(0.8),
     // 压缩后完整保留的尾部消息预算，占 contextWindow 的比例
     compactRetainRatio: z.number().min(0).max(1).default(0.16),
+    // 单次模型响应中允许同时执行的工具调用数
+    maxConcurrentToolCalls: z.int().positive().default(10),
   })
   .superRefine((settings, ctx) => {
     const seen = new Set<string>();

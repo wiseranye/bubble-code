@@ -41,7 +41,7 @@ export type ToolChatMessage = {
   output: string;
   error?: string;
   metadata?: Record<string, unknown>;
-  status: 'running' | 'done';
+  status: 'queued' | 'running' | 'done';
   success: boolean;
 };
 
@@ -78,7 +78,7 @@ export class AgentSession {
   private idCounter = 1;
   private generating = false;
   private abortController: AbortController | undefined;
-  // 当前打开的流式文本段；角色切换、tool_start、turn_end、run_end 都会冻结它
+  // 当前打开的流式文本段；角色切换、tool_queued、turn_end、run_end 都会冻结它
   private openBlock: { id: number; role: TextBlockRole } | undefined;
   // 键为 toolCallId、值为 Chat message id，用来把 tool_result 贴回对应的工具消息
   private readonly toolBlocks = new Map<string, number>();
@@ -243,8 +243,8 @@ export class AgentSession {
               content: block.thinking,
             });
           } else {
-            // 恢复的会话不在执行中，工具消息直接是终态；成功与否没有持久化，按成功展示，
-            // 另外两个展示字段由后面的 tool_result 补上（output、metadata）
+            // 恢复的会话不在执行中，工具消息直接是终态；error、output、metadata
+            // 由后面的 tool_result 补上，没有 error 时沿用旧格式的成功默认值
             const toolMessage: ToolChatMessage = {
               id: this.idCounter++,
               role: 'tool',
@@ -269,6 +269,10 @@ export class AgentSession {
           // metadata 里有 diff 这类展示数据，丢了就只剩无行号的兜底渲染
           if (message.metadata !== undefined) {
             toolMessage.metadata = message.metadata;
+          }
+          toolMessage.error = message.error;
+          if (message.error !== undefined) {
+            toolMessage.success = false;
           }
         }
         break;
@@ -665,8 +669,8 @@ export class AgentSession {
         break;
       }
 
-      case 'tool_start': {
-        // 工具调用开始，说明上一段文本/思考已经写完，可以冻结
+      case 'tool_queued': {
+        // 完整调用一收到就进入 Transcript，并冻结前面的文本/思考段
         this.sealOpenBlock();
         const { toolCall } = event;
         const message: ToolChatMessage = {
@@ -676,12 +680,24 @@ export class AgentSession {
           name: toolCall.name,
           input: JSON.stringify(toolCall.input),
           output: '',
-          status: 'running',
+          status: 'queued',
           success: true,
         };
         this.toolBlocks.set(toolCall.id, message.id);
         this.store.push(message);
         this.emit({ type: 'message_added', message });
+        break;
+      }
+
+      case 'tool_start': {
+        const id = this.toolBlocks.get(event.toolCall.id);
+        if (id !== undefined) {
+          this.update(id, message =>
+            message.role === 'tool'
+              ? { ...message, status: 'running' }
+              : message,
+          );
+        }
         break;
       }
 
@@ -788,9 +804,12 @@ export class AgentSession {
 
   private finishRun(): void {
     this.sealOpenBlock();
-    // 取消或异常退出时，可能还有工具消息停在「执行中」
+    // 异常兜底仍要关闭所有非终态工具；正常 Abort 已由 agent loop 补齐具体结果
     for (const message of this.store) {
-      if (message.role === 'tool' && message.status === 'running') {
+      if (
+        message.role === 'tool' &&
+        (message.status === 'queued' || message.status === 'running')
+      ) {
         const updated = this.update(message.id, current =>
           current.role === 'tool'
             ? { ...current, status: 'done', success: false }

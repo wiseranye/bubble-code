@@ -54,6 +54,7 @@ test('calls the original MCP tool with timeout, cancellation and schema', async 
   };
   const [tool] = createMcpTools('local', client, [serverTool]);
   const controller = new AbortController();
+  expect(tool?.isConcurrencySafe({})).toBe(true);
   const result = await tool?.execute(
     { query: 'bubble' },
     { cwd: '/tmp', signal: controller.signal },

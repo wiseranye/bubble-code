@@ -283,6 +283,7 @@ test('toPiContext：tools 转 pi Tool，JSON Schema 作 parameters', () => {
           type: 'object',
           properties: { command: { type: 'string' } },
         },
+        isConcurrencySafe: () => false,
         execute: () => Promise.resolve({ success: true, output: '' }),
       },
     ],

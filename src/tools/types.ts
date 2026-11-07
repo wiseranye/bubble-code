@@ -4,8 +4,9 @@ export interface ToolContext {
   signal?: AbortSignal;
 }
 
-// 工具渲染状态：running/streaming 只有输入，done 才有结果
+// 工具渲染状态：queued/running/streaming 只有输入，done 才有结果
 export type ToolRenderState =
+  | { status: 'queued'; input: unknown }
   | { status: 'running'; input: unknown }
   // streaming 预留给流式输出，暂无调用方
   | { status: 'streaming'; input: unknown; partial: string }
@@ -41,6 +42,8 @@ export type Tool<TInput = unknown> = {
   inputSchema: Record<string, unknown>;
   // 该工具的界面渲染器；没有渲染器的工具由调用方走通用渲染
   render?: ToolRenderer;
+  // 只依据本次输入判断；true 表示可与同批任意其他安全调用并行
+  isConcurrencySafe(input: TInput): boolean;
   execute(input: TInput, context: ToolContext): Promise<ToolResult>;
 };
 

@@ -46,6 +46,7 @@ export function createMcpTools(
       name,
       description: definition.description ?? `MCP tool: ${definition.name}`,
       inputSchema: { ...definition.inputSchema },
+      isConcurrencySafe: () => true,
       async execute(input: unknown, context): Promise<ToolResult> {
         if (
           input === null ||

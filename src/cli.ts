@@ -66,6 +66,7 @@ async function main(): Promise<void> {
       const current = catalog.current;
       return current === undefined ? undefined : catalog.createApi(current);
     },
+    maxConcurrentToolCalls: settings.maxConcurrentToolCalls,
   });
   // 压缩配置按当前选中项现算：/model 切换后 /new 的会话跟随新模型的 contextWindow；
   // contextWindow 取装配后模型的生效值（settings 覆盖 catalog，兜底 256k）

@@ -27,6 +27,25 @@ test('statusBar defaults to enabled with the default style', async () => {
   expect(settings.statusBar).toEqual({ enable: true, style: 'default' });
 });
 
+test('maxConcurrentToolCalls defaults to 10 and accepts positive integers', async () => {
+  expect(
+    (await loadSettings(withSettingsFile('{}'))).maxConcurrentToolCalls,
+  ).toBe(10);
+  expect(
+    (await loadSettings(withSettingsFile('{"maxConcurrentToolCalls":1}')))
+      .maxConcurrentToolCalls,
+  ).toBe(1);
+});
+
+test('maxConcurrentToolCalls rejects zero and non-integers', async () => {
+  await expect(
+    loadSettings(withSettingsFile('{"maxConcurrentToolCalls":0}')),
+  ).rejects.toThrow(/配置校验失败/);
+  await expect(
+    loadSettings(withSettingsFile('{"maxConcurrentToolCalls":1.5}')),
+  ).rejects.toThrow(/配置校验失败/);
+});
+
 test('statusBar accepts the powerline style', async () => {
   const settings = await loadSettings(
     withSettingsFile('{"statusBar":{"enable":false,"style":"powerline"}}'),

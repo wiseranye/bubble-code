@@ -24,6 +24,7 @@ export const bashTool = defineTool({
   name: 'bash',
   description: '当需要执行bash命令的时候使用',
   inputSchema: bashInputSchema,
+  isConcurrencySafe: () => false,
   async execute(input: BashInput, context: ToolContext): Promise<ToolResult> {
     let timeout: number;
     if (input.timeout === undefined) {

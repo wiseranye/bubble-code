@@ -7,6 +7,7 @@ export interface AgentFactoryOptions {
   readonly tools: ToolRegistry;
   readonly createTools?: () => ToolSource;
   readonly createModelApi: () => ModelApi | undefined;
+  readonly maxConcurrentToolCalls?: number;
   readonly discoveryOptions: DiscoverSkillsOptions;
   // 测试可注入 spy；生产始终使用真实发现函数。
   readonly discover?: typeof discoverSkills;
@@ -23,6 +24,7 @@ export function createAgentFactory(options: AgentFactoryOptions): () => Agent {
       tools: options.createTools?.() ?? options.tools,
       cwd: options.discoveryOptions.cwd,
       skillSnapshot,
+      maxConcurrentToolCalls: options.maxConcurrentToolCalls,
     });
   };
 }

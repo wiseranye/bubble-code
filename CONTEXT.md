@@ -37,8 +37,16 @@ _Avoid_: CLI 启动目录、进程 cwd
 _Avoid_: Finalized、Committed、Closed
 
 **Tool message（工具消息）**:
-一条记录单次工具调用的 Chat message：工具名、原始输入、执行输出与状态（running / done）。
+一条记录单次工具调用的 Chat message：工具名、原始输入、执行输出与状态（queued / running / done）。queued 表示调用已完整接收、正在准备执行，但尚未获得执行槽位。
 _Avoid_: Tool call（那是协议层的记录）
+
+**Tool call batch（工具调用批次）**:
+一条 Assistant Protocol message 产生的全部 Tool call，是并发资格判断与并发上限的作用范围。
+_Avoid_: Run 级工具队列、会话级工具队列
+
+**Concurrency-safe（并发安全）**:
+Tool call 的属性，表示它可以与同批任意其他并发安全的 Tool call 同时执行。
+_Avoid_: Read-only、无副作用
 
 **MCP tool（MCP 工具）**:
 由外部 MCP Server 提供的工具，在 Agent 看来与普通工具相同。

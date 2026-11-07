@@ -25,6 +25,7 @@ export const editTool = defineTool({
   description: 'Edit an existing UTF-8 text file by replacing literal text.',
   inputSchema: editInputSchema,
   render: editRenderer,
+  isConcurrencySafe: () => false,
   async execute(input: EditInput, ctx: ToolContext): Promise<ToolResult> {
     if (input.oldText === '') {
       return failure('oldText must not be empty');

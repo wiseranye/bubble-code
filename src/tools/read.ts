@@ -125,6 +125,7 @@ export const readTool = defineTool({
   description: `Read the contents of a text file. output is truncated to ${DEFAULT_MAX_LINES} lines or ${DEFAULT_MAX_BYTES / 1024}KB (whichever is hit first). Use offset/limit for large files. When you need the full file, continue with offset until complete.`,
   inputSchema: readInputSchema,
   render: readRenderer,
+  isConcurrencySafe: () => true,
   async execute(input: ReadInput): Promise<ToolResult> {
     try {
       const fileStat = await stat(input.filePath);
