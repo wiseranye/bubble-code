@@ -37,8 +37,8 @@ const graphemeSegmenter = new Intl.Segmenter(undefined, {
 // Nerd Font 图标：模型、目录、分支、MCP、上下文、缓存
 const icons: Record<BlockKey, string> = {
   model: '\u{F2DB}',
-  cwd: '\u{F07B}',
-  branch: '\u{E0A0}',
+  cwd: '\u{F115}',
+  branch: '\u{F418}',
   mcp: '\u{F1E6}',
   context: '\u{F1C0}',
   cache: '\u{F0E7}',
@@ -133,7 +133,8 @@ export function renderStatusLine(
   }
 
   let blocks = buildBlocks(data, barStyle);
-  let line = renderBlocks(blocks);
+  const separator = separatorFor(barStyle);
+  let line = renderBlocks(blocks, separator);
   while (visibleWidth(line) > width) {
     const last = blocks.at(-1);
     if (last === undefined) {
@@ -148,7 +149,7 @@ export function renderStatusLine(
       blocks = blocks.slice(0, -1);
     }
 
-    line = renderBlocks(blocks);
+    line = renderBlocks(blocks, separator);
   }
 
   return blocks.length === 0 ? undefined : line;
@@ -205,17 +206,17 @@ function buildBlocks(data: StatusBarData, barStyle: StatusBarStyle): Block[] {
     blocks.push(makeBlock('context', context, decorated));
   }
 
-  if (data.mcp !== undefined) {
-    const mcp = `✓ ${data.mcp.connected}  ◌ ${data.mcp.connecting}  ✗ ${data.mcp.failed}`;
-    blocks.push(makeBlock('mcp', mcp, decorated));
-  }
-
   if (data.cache !== undefined) {
     const cache = `${formatTokens(data.cache.read)} (${formatPercent(
       data.cache.read,
       data.cache.promptTokens,
     )})`;
     blocks.push(makeBlock('cache', cache, decorated));
+  }
+
+  if (data.mcp !== undefined) {
+    const mcp = `✓ ${data.mcp.connected}  ◌ ${data.mcp.connecting}  ✗ ${data.mcp.failed}`;
+    blocks.push(makeBlock('mcp', mcp, decorated));
   }
 
   return blocks;
@@ -247,8 +248,16 @@ function makeBlock(
   };
 }
 
-function renderBlocks(blocks: Block[]): string {
-  const separator = ` ${themeStyle.dim('│')} `;
+function separatorFor(barStyle: StatusBarStyle): string {
+  // 带图标时用 Nerd Font 的 angle-right，纯文本样式仍用竖线
+  if (barStyle !== 'default') {
+    return ` ${themeStyle.dim('\u{F105}')} `;
+  }
+
+  return ` ${themeStyle.dim('│')} `;
+}
+
+function renderBlocks(blocks: Block[], separator: string): string {
   const text = blocks
     .map(block => segmentColors[block.key](`${block.prefix}${block.value}`))
     .join(separator);

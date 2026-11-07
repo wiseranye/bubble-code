@@ -95,7 +95,7 @@ test('default style renders model first, then cwd, branch, context, cache', () =
 
 test('nerdfont style replaces labels with icons', () => {
   expect(renderPlain(data, 'nerdfont', 200)).toBe(
-    ' \u{F2DB} kimi-code/k3 (high) │ \u{F07B} ~/codespace/bubble-code │ \u{E0A0} main │ \u{F1C0} 128K/256K (50%) │ \u{F0E7} 96K (75%)',
+    ' \u{F2DB} kimi-code/k3 (high) \u{F105} \u{F115} ~/codespace/bubble-code \u{F105} \u{F418} main \u{F105} \u{F1C0} 128K/256K (50%) \u{F105} \u{F0E7} 96K (75%)',
   );
 });
 
@@ -106,8 +106,8 @@ test('renders MCP connection counts with status symbols', () => {
   };
   const line = renderPlain(withMcp, 'default', 200);
   expect(line).toContain('MCP ✓ 2  ◌ 1  ✗ 3');
-  expect(line.indexOf('上下文')).toBeLessThan(line.indexOf('MCP'));
-  expect(line.indexOf('MCP')).toBeLessThan(line.indexOf('缓存'));
+  expect(line.indexOf('上下文')).toBeLessThan(line.indexOf('缓存'));
+  expect(line.indexOf('缓存')).toBeLessThan(line.indexOf('MCP'));
   expect(renderPlain(withMcp, 'nerdfont', 200)).toContain(
     '\u{F1E6} ✓ 2  ◌ 1  ✗ 3',
   );
@@ -145,10 +145,17 @@ test('all styles color text without background colors', () => {
   }
 });
 
-test('all styles use vertical bar separators', () => {
-  for (const style of ['default', 'nerdfont', 'powerline'] as const) {
+test('default style keeps the vertical bar separator', () => {
+  const plain = stripTerminalSequences(render(data, 'default', 200));
+  expect(plain).toContain(' │ ');
+  expect(plain).not.toContain('\u{F105}');
+});
+
+test('icon styles use the angle-right separator instead of a vertical bar', () => {
+  for (const style of ['nerdfont', 'powerline'] as const) {
     const plain = stripTerminalSequences(render(data, style, 200));
-    expect(plain).toContain(' │ ');
+    expect(plain).toContain(' \u{F105} ');
+    expect(plain).not.toContain('│');
     expect(plain).not.toContain('\u{E0B0}');
   }
 });
