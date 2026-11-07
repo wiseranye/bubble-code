@@ -6,6 +6,7 @@ import type {
   Usage,
   UserMessage,
 } from '../llm/types.ts';
+import type { UiContext } from '../ui/ui-context.ts';
 import { type Agent, UNCONFIGURED_MODEL_MESSAGE } from './agent.ts';
 import type { AgentLoopHookContext } from './agent-loop.ts';
 import {
@@ -290,6 +291,10 @@ export class AgentSession {
 
   get cwd(): string {
     return this.agent.cwd;
+  }
+
+  setUiContext(uiContext: UiContext | undefined): void {
+    this.agent.setUiContext(uiContext);
   }
 
   get skills(): readonly Skill[] {

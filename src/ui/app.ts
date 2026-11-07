@@ -32,9 +32,9 @@ import {
 import type { ModelCatalog, ModelChoice } from '../llm/model-catalog.ts';
 import type { McpConnection, McpStatus } from '../mcp/manager.ts';
 import type { StatusBarConfig } from '../setting-manager.ts';
-import type { QuestionnaireOutcome as QuestionnaireResult } from '../tools/ask-user-input.ts';
 import type { ToolRegistry } from '../tools/types.ts';
 import { readGitBranch } from '../utils/git.ts';
+import { AppUiContext } from './app-ui-context.ts';
 import { LogoBanner } from './logo.ts';
 import { McpPicker } from './mcp-picker.ts';
 import {
@@ -43,7 +43,6 @@ import {
   type MessageView,
 } from './message-view.ts';
 import { ModelPicker } from './model-picker.ts';
-import { QuestionnaireView } from './questionnaire.ts';
 import { SessionPicker } from './session-picker.ts';
 import {
   SlashCommandAutocomplete,
@@ -76,7 +75,9 @@ export function createChatApp(
   transcript.addChild(new LogoBanner());
   transcript.addChild(messageArea);
   const indicatorSlot = new Container();
-  const questionnaireSlot = new Container();
+  const dialogSlot = new Container();
+  const widgetAboveSlot = new Container();
+  const widgetBelowSlot = new Container();
   const views = new Map<number, MessageView>();
   let indicator: BubblingIndicator | undefined;
 
@@ -166,7 +167,6 @@ export function createChatApp(
 
   let streaming = false;
   let compacting = false;
-  let activeQuestionnaire: QuestionnaireView | undefined;
   const setStreaming = (isStreaming: boolean): void => {
     streaming = isStreaming;
     editor.disableSubmit = streaming || compacting;
@@ -197,17 +197,19 @@ export function createChatApp(
   };
 
   const handleKey = (data: string): TuiInputListenerResult => {
-    // 弹窗打开时按键全部交给弹窗处理（Esc / Ctrl+C 由 SelectList 走取消）
-    if (tui.hasOverlay()) {
-      return undefined;
-    }
-
-    if (activeQuestionnaire !== undefined) {
+    // 工具交互期间 Ctrl+C 中止 Run；其余按键交给当前组件。
+    if (uiContext.hasPrompts) {
       if (matchesKey(data, Key.ctrl('c'))) {
         session.cancel();
         return { consume: true };
       }
-      // Esc 与其他按键交给问卷；Ctrl+C 只中止 Run，不再退出进程。
+      if (uiContext.hasInlinePrompts || tui.hasOverlay()) {
+        return undefined;
+      }
+    }
+
+    // 弹窗打开时按键全部交给弹窗处理（Esc / Ctrl+C 由 SelectList 走取消）
+    if (tui.hasOverlay()) {
       return undefined;
     }
 
@@ -275,6 +277,7 @@ export function createChatApp(
 
   // 重新绑定会话：退订旧会话，清空视图，订阅新会话并补建已有消息（欢迎语）
   const bindSession = (): void => {
+    session.setUiContext(uiContext);
     unsubscribeSession();
     views.clear();
     messageArea.clear();
@@ -486,6 +489,21 @@ export function createChatApp(
     follow: 'end',
     primary: true,
   });
+  const uiContext = new AppUiContext({
+    tui,
+    editor,
+    dialogSlot,
+    widgetSlots: {
+      aboveEditor: widgetAboveSlot,
+      belowEditor: widgetBelowSlot,
+    },
+    notify: (message, level) => {
+      const prefix =
+        level === 'error' ? '错误：' : level === 'warning' ? '警告：' : '';
+      session.notify(`${prefix}${message}`);
+    },
+  });
+
   // 底部固定区，不随转录滚动：生成状态、状态栏、输入框、提示行
   const dockChildren: StackChild[] = [
     { component: indicatorSlot, shrink: 1, minSize: 0 },
@@ -495,23 +513,35 @@ export function createChatApp(
   }
   dockChildren.push(
     {
-      component: questionnaireSlot,
+      component: widgetAboveSlot,
+      shrink: 1,
+      minSize: 0,
+      visible: () => uiContext.hasWidgets('aboveEditor'),
+    },
+    {
+      component: dialogSlot,
       shrink: 1,
       minSize: 1,
       maxSize: 24,
-      visible: () => activeQuestionnaire !== undefined,
+      visible: () => uiContext.hasInlinePrompts,
     },
     {
       component: editor,
       shrink: 1,
       minSize: 3,
-      visible: () => activeQuestionnaire === undefined,
+      visible: () => !uiContext.hasInlinePrompts,
+    },
+    {
+      component: widgetBelowSlot,
+      shrink: 1,
+      minSize: 0,
+      visible: () => uiContext.hasWidgets('belowEditor'),
     },
     {
       component: new Text(style.dim(hintText), 1, 0),
       shrink: 1,
       minSize: 0,
-      visible: () => activeQuestionnaire === undefined,
+      visible: () => !uiContext.hasInlinePrompts,
     },
   );
   const dock = new VStack(dockChildren);
@@ -524,42 +554,6 @@ export function createChatApp(
   );
   tui.setFocus(editor);
   tui.addInputListener(handleKey);
-
-  tools.connectUi({
-    showQuestionnaire: (input, signal) => {
-      if (activeQuestionnaire !== undefined) {
-        return Promise.reject(new Error('已有问卷正在等待用户回答'));
-      }
-      if (signal?.aborted) {
-        return Promise.resolve({ status: 'aborted' });
-      }
-
-      return new Promise<QuestionnaireResult>(resolve => {
-        let settled = false;
-        const finish = (outcome: QuestionnaireResult): void => {
-          if (settled) {
-            return;
-          }
-          settled = true;
-          signal?.removeEventListener('abort', onAbort);
-          activeQuestionnaire = undefined;
-          questionnaireSlot.clear();
-          tui.setFocus(editor);
-          resolve(outcome);
-          tui.requestRender();
-        };
-        const onAbort = (): void => finish({ status: 'aborted' });
-        const view = new QuestionnaireView(tui, input, finish, () =>
-          tui.requestRender(),
-        );
-        activeQuestionnaire = view;
-        questionnaireSlot.addChild(view);
-        signal?.addEventListener('abort', onAbort, { once: true });
-        tui.setFocus(view);
-        tui.requestRender();
-      });
-    },
-  });
 
   // 已有的消息（欢迎语）在订阅之前就存在，bindSession 里直接补建视图
   bindSession();

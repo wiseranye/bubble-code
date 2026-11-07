@@ -1,30 +1,27 @@
+import { QuestionnaireView } from '../ui/questionnaire.ts';
 import { askUserRenderer } from './ask-user.render.ts';
 import {
   type AskUserInput,
   askUserInputSchema,
   type QuestionAnswer,
+  type QuestionnaireOutcome,
 } from './ask-user-input.ts';
 import { defineTool } from './schema.ts';
 import type { ToolResult } from './types.ts';
-import type { ToolUi } from './ui.ts';
 
 export function createAskUserTool() {
-  let ui: ToolUi | undefined;
   return defineTool({
     name: 'ask_user',
     description: `Ask the user one or more questions when information required to proceed is missing or a decision belongs to the user. Put all related questions in one call. Do not use this for facts that can be found with other tools. Every question needs at least two preset options; the user can also enter a custom answer.`,
     inputSchema: askUserInputSchema,
     render: askUserRenderer,
-    connectUi: nextUi => {
-      ui = nextUi;
-    },
     isConcurrencySafe: () => false,
     async execute(input: AskUserInput, context): Promise<ToolResult> {
       if (context.signal?.aborted) {
         return { success: false, output: '', error: 'user aborted' };
       }
-      const currentUi = ui;
-      if (currentUi === undefined) {
+      const ui = context.ui;
+      if (ui === undefined) {
         return {
           success: false,
           output: '',
@@ -32,10 +29,19 @@ export function createAskUserTool() {
         };
       }
       try {
-        const outcome = await currentUi.showQuestionnaire(
-          input,
-          context.signal,
+        const outcome = await ui.custom<QuestionnaireOutcome>(
+          (environment, done) =>
+            new QuestionnaireView(
+              environment.tui,
+              input,
+              done,
+              environment.requestRender,
+            ),
+          { signal: context.signal, placement: 'replaceEditor' },
         );
+        if (outcome === undefined) {
+          return { success: false, output: '', error: 'user aborted' };
+        }
         switch (outcome.status) {
           case 'submitted':
             return {

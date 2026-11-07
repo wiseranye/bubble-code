@@ -7,7 +7,7 @@ import type {
   AskUserInput,
   QuestionnaireOutcome,
 } from '../../src/tools/ask-user-input.ts';
-import { newToolRegistry } from '../../src/tools/index.ts';
+import type { UiContext } from '../../src/ui/ui-context.ts';
 
 const input: AskUserInput = {
   questions: [
@@ -44,10 +44,13 @@ test('formats plain-text answers with original questions and multiline values', 
 });
 
 test('maps UI submission, cancellation and abort to tool results', async () => {
-  const tools = newToolRegistry();
-  const tool = tools.find('ask_user');
-  let outcome: QuestionnaireOutcome = { status: 'cancelled' };
-  tools.connectUi({ showQuestionnaire: () => Promise.resolve(outcome) });
+  const tool = createAskUserTool();
+  let outcome: QuestionnaireOutcome | undefined = { status: 'cancelled' };
+  const ui: UiContext = {
+    custom: <T>() => Promise.resolve(outcome as T),
+    notify: () => undefined,
+    setWidget: () => undefined,
+  };
   const outcomes = [
     {
       status: 'submitted',
@@ -59,7 +62,7 @@ test('maps UI submission, cancellation and abort to tool results', async () => {
 
   for (const nextOutcome of outcomes) {
     outcome = nextOutcome;
-    const result = await tool.execute(input, { cwd: '/work/project' });
+    const result = await tool.execute(input, { cwd: '/work/project', ui });
     if (nextOutcome.status === 'submitted') {
       expect(result.success).toBe(true);
       expect(result.output).toContain('用户回答了你的问题：');
@@ -97,18 +100,21 @@ test('reports an unavailable UI without requiring CLI-specific wiring', async ()
 test('does not enter the UI when the run was already aborted', async () => {
   let called = false;
   const tool = createAskUserTool();
-  tool.connectUi?.({
-    showQuestionnaire: () => {
+  const ui: UiContext = {
+    custom: () => {
       called = true;
-      return Promise.resolve({ status: 'cancelled' });
+      return Promise.resolve(undefined);
     },
-  });
+    notify: () => undefined,
+    setWidget: () => undefined,
+  };
   const controller = new AbortController();
   controller.abort();
 
   const result = await tool.execute(input, {
     cwd: '/work/project',
     signal: controller.signal,
+    ui,
   });
 
   expect(called).toBe(false);

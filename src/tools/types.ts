@@ -1,9 +1,11 @@
-import type { ToolUi } from './ui.ts';
+import type { UiContext } from '../ui/ui-context.ts';
 
 // 工具上下文
 export interface ToolContext {
   cwd: string;
+  toolCallId?: string;
   signal?: AbortSignal;
+  ui?: UiContext;
 }
 
 // 工具渲染状态：queued/running/streaming 只有输入，done 才有结果
@@ -46,8 +48,6 @@ export type Tool<TInput = unknown> = {
   inputSchema: Record<string, unknown>;
   // 该工具的界面渲染器；没有渲染器的工具由调用方走通用渲染
   render?: ToolRenderer;
-  // 需要交互的工具通过统一入口连接 App；不需要 UI 的工具不实现此方法。
-  connectUi?(ui: ToolUi): void;
   // 只依据本次输入判断；true 表示可与同批任意其他安全调用并行
   isConcurrencySafe(input: TInput): boolean;
   execute(input: TInput, context: ToolContext): Promise<ToolResult>;
@@ -83,13 +83,6 @@ export class ToolRegistry implements ToolSource {
 
   list(): AnyTool[] {
     return [...this.tools.values()];
-  }
-
-  // Run 快照复制的是 Tool 引用，因此在原注册表绑定一次即可覆盖后续快照。
-  connectUi(ui: ToolUi): void {
-    for (const tool of this.tools.values()) {
-      tool.connectUi?.(ui);
-    }
   }
 
   find(name: string): AnyTool {

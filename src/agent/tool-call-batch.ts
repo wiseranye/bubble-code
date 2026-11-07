@@ -46,9 +46,12 @@ async function executeToolCall(
   let metadata: Record<string, unknown> | undefined;
   let success = false;
   try {
-    const result = await context.tools
-      .find(call.name)
-      .execute(call.input, { cwd: context.cwd, signal });
+    const result = await context.tools.find(call.name).execute(call.input, {
+      cwd: context.cwd,
+      toolCallId: call.id,
+      signal,
+      ui: context.ui,
+    });
     success = result.success;
     // error 和 output 分开保留；拼成模型可见文本的事在 llm 适配层做
     output = result.output;

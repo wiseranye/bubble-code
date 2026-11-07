@@ -7,7 +7,12 @@ import {
 import type { AgentContext, AgentEvent } from '../../src/agent/types.ts';
 import type { ToolCall } from '../../src/llm/types.ts';
 import { defineTool } from '../../src/tools/schema.ts';
-import { ToolRegistry, type ToolResult } from '../../src/tools/types.ts';
+import {
+  type ToolContext,
+  ToolRegistry,
+  type ToolResult,
+} from '../../src/tools/types.ts';
+import type { UiContext } from '../../src/ui/ui-context.ts';
 
 type Input = { id: string };
 type Execute = (input: Input) => Promise<ToolResult>;
@@ -63,6 +68,36 @@ function resultIds(events: readonly AgentEvent[]): string[] {
     event.type === 'tool_result' ? [event.toolCallId] : [],
   );
 }
+
+test('passes call-specific id and session UI into each tool execution', async () => {
+  const ui: UiContext = {
+    custom: () => Promise.resolve(undefined),
+    notify: () => undefined,
+    setWidget: () => undefined,
+  };
+  const tools = new ToolRegistry();
+  let seen: ToolContext | undefined;
+  tools.register(
+    defineTool({
+      name: 'test',
+      description: 'test',
+      inputSchema: z.object({ id: z.string() }),
+      isConcurrencySafe: () => true,
+      execute: async (_input, context) => {
+        seen = context;
+        return { success: true, output: 'ok' };
+      },
+    }),
+  );
+
+  await executeToolCallBatch([call('call-1')], {
+    context: { tools, cwd: '/tmp', messages: [], ui },
+    maxConcurrentCalls: 1,
+    emit: () => undefined,
+  });
+
+  expect(seen).toMatchObject({ toolCallId: 'call-1', cwd: '/tmp', ui });
+});
 
 test('safe calls roll into freed slots and return results in declaration order', async () => {
   const ids = ['a', 'b', 'c', 'd', 'e'];

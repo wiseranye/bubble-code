@@ -7,6 +7,7 @@ import type {
   ToolResultMessage,
 } from '../llm/types.ts';
 import type { ToolSource } from '../tools/types.ts';
+import type { UiContext } from '../ui/ui-context.ts';
 
 // Agent 事件
 export type AgentEvent =
@@ -47,6 +48,8 @@ export type AgentContext = {
   // 工具注册中心
   tools: ToolSource;
   cwd: string;
+  // 当前会话的通用 UI 能力；非交互运行时可以为空
+  ui?: UiContext;
   // 会话中所有的消息
   messages: AgentMessage[];
 };

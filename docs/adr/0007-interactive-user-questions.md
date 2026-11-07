@@ -1,9 +1,9 @@
 # 通过交互式提问工具暂停并恢复 Run
 
-新增始终注册的内置 `ask_user` 工具，让模型用一次调用提出一个或多个问题。Agent Loop 已经等待 `Tool.execute`，因此提问工具通过 `ToolUi.showQuestionnaire` 返回一个等待用户操作的 Promise 即可暂停 Run；最终提交、Esc 取消或 Run Abort 使 Promise settle，无需新增 Agent 事件或暂停状态机。`ToolRegistry.connectUi` 统一绑定 App 提供的交互能力，具体工具自行实现可选的 `connectUi`，CLI 不需要知道 `ask_user` 或后续交互工具的专属装配。该工具声明为非并发安全，同批多个提问调用按声明顺序串行执行。
+新增始终注册的内置 `ask_user` 工具，让模型用一次调用提出一个或多个问题。Agent Loop 已经等待 `Tool.execute`，因此提问工具通过 `UiContext.custom` 返回一个等待用户操作的 Promise 即可暂停 Run；最终提交、Esc 取消或 Run Abort 使 Promise settle，无需新增 Agent 事件或暂停状态机。`UiContext` 是工具无关的通用 UI 能力接口，提供 `custom`、`notify` 和 `setWidget`；每次工具执行通过 `ToolContext` 接收当前会话的 `ui`、`toolCallId` 与 `signal`，App 统一负责组件栈、焦点和清理，CLI 与 UI 宿主都不需要识别具体工具。该工具声明为非并发安全，同批多个提问调用按声明顺序串行执行。
 
 问卷位于普通输入框上方并暂时隐藏输入框。每题包含短标题、完整问题、单选/多选模式和带可选说明的预设选项，并始终提供多行自定义输入；所有问题必须回答。单选题在 Enter 后更新答案并前进，多选题的选择立即生效且不自动前进。单题调用在确认后直接返回；多题调用必须由用户在 Review 页确认全部当前答案后整体提交，Submit 页始终可访问，但未完成时只引导用户回到第一道未答题。第一版不支持鼠标操作，也不限制题数、选项数或文本长度，由问卷内部处理滚动。
 
 正常提交以包含原始问题和答案的普通文本作为工具输出并持久化。Esc 只取消当前问卷，以失败工具结果“用户取消了回答”交回模型并继续 Run；Ctrl+C 中止整个 Run，工具以 `user aborted` settle，避免工具批次永久等待。进程终止时不保存或恢复未完成问卷，已完成的工具结果仍按现有会话机制恢复。
 
-备选方案是新增 Agent/ChatSession 交互事件和可恢复的暂停状态，或用 Overlay 承载问卷。前者扩大 Agent 与持久化协议的改动范围，后者不符合输入框上方的目标布局；通用 `ToolUi` 绑定加 pending Promise 已能复用现有工具结果配对、Abort 和持久化语义，因此不采用这些方案。
+备选方案是新增 Agent/ChatSession 交互事件和可恢复的暂停状态，或用 Overlay 承载问卷。前者扩大 Agent 与持久化协议的改动范围，后者不符合输入框上方的目标布局；执行上下文中的通用 `UiContext` 加 pending Promise 已能复用现有工具结果配对、Abort 和持久化语义，因此不采用这些方案。

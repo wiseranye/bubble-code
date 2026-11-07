@@ -2,6 +2,7 @@
 
 import type { ModelApi, UserMessage } from '../llm/types.ts';
 import { ToolRegistry, type ToolSource } from '../tools/types.ts';
+import type { UiContext } from '../ui/ui-context.ts';
 import {
   type AgentLoopHook,
   fireAgentLoopHooks,
@@ -32,6 +33,7 @@ export class Agent {
   private runTools: ToolRegistry | undefined;
   private readonly _hooks: AgentLoopHook[] = [];
   private readonly maxConcurrentToolCalls: number;
+  private uiContext: UiContext | undefined;
   // 系统提示词装配器：生命周期与 Agent 一致，construction 节只求值一次。
   // 系统消息不随构造写入历史：每次 run / 请求前由刷新钩子按需追加，
   // 恢复的老会话也能借此感知工具与扩展的变化
@@ -53,6 +55,7 @@ export class Agent {
     this._tools = tools;
     this.cwd = cwd;
     this.maxConcurrentToolCalls = maxConcurrentToolCalls;
+    this.uiContext = undefined;
     this.skillSnapshot = skillSnapshot;
     this._state = {
       messages: [],
@@ -84,6 +87,10 @@ export class Agent {
   // 同一时机的钩子按注册顺序串行执行
   registerHook(hook: AgentLoopHook): void {
     this._hooks.push(hook);
+  }
+
+  setUiContext(uiContext: UiContext | undefined): void {
+    this.uiContext = uiContext;
   }
 
   // 每次 run 开始、用户消息进入历史与落盘之前触发：
@@ -118,6 +125,7 @@ export class Agent {
     const context: AgentContext = {
       tools: this.toolSnapshot,
       cwd: this.cwd,
+      ui: this.uiContext,
       messages: this._state.messages,
     };
     try {
