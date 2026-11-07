@@ -60,6 +60,10 @@ _Avoid_: Session 私有连接、全局工具状态
 一次 Run 开始时确定的可用工具集合；该 Run 期间保持不变，后续 Run 可以包含新就绪的 MCP 工具。
 _Avoid_: Live tools、Turn 工具列表
 
+**Questionnaire（问卷）**:
+一次 `ask_user` 工具调用向用户提出的问题集合及其当前答案，是逐题回答与多题整体提交的交互边界。
+_Avoid_: Prompt、Dialog、Question form
+
 **Context（上下文）**:
 一次请求发给模型的全部 Protocol message：system prompt、（如有）最近一次压缩的摘要、保留区间。
 _Avoid_: 消息历史、History

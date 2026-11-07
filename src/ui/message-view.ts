@@ -402,11 +402,12 @@ export class ToolMessageView implements MessageView {
     const displayName =
       this.renderer.displayName?.(state.input) ?? this.message.name;
     const name = style.toolName(displayName, failed);
+    const customActivity = this.renderer.activity?.(state);
     const activity =
       state.status === 'queued'
         ? style.running('（正在准备调用…）')
         : state.status === 'running'
-          ? style.running('（执行中…）')
+          ? style.running(`（${customActivity ?? '执行中…'}）`)
           : '';
     const summary =
       this.renderer.summarise?.(state.input) ?? summariseToolInput(state.input);

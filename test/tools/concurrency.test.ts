@@ -15,5 +15,6 @@ test('built-in tools declare conservative concurrency safety', () => {
     write: false,
     find: true,
     grep: true,
+    ask_user: false,
   });
 });

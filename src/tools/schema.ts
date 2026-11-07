@@ -1,11 +1,13 @@
 import * as z from 'zod';
 import type { Tool, ToolContext, ToolRenderer, ToolResult } from './types.ts';
+import type { ToolUi } from './ui.ts';
 
 export interface DefineToolOptions<Input extends z.ZodType> {
   name: string;
   description: string;
   inputSchema: Input;
   render?: ToolRenderer;
+  connectUi?(ui: ToolUi): void;
   isConcurrencySafe(input: z.infer<Input>): boolean;
   execute(input: z.infer<Input>, context: ToolContext): Promise<ToolResult>;
 }
@@ -18,6 +20,7 @@ export function defineTool<Input extends z.ZodType>(
     description: options.description,
     inputSchema: z.toJSONSchema(options.inputSchema),
     render: options.render,
+    connectUi: options.connectUi,
     isConcurrencySafe: options.isConcurrencySafe,
     execute: options.execute,
   };

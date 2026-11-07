@@ -1,3 +1,4 @@
+import { createAskUserTool } from './ask-user.ts';
 import { bashTool } from './bash.ts';
 import { editTool } from './edit.ts';
 import { findTool } from './find.ts';
@@ -14,6 +15,7 @@ export function newToolRegistry(): ToolRegistry {
   registry.register(writeTool);
   registry.register(findTool);
   registry.register(grepTool);
+  registry.register(createAskUserTool());
   return registry;
 }
 
