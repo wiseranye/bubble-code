@@ -15,6 +15,11 @@ import path, { dirname, join, resolve } from 'node:path';
 import { v7 as uuidv7 } from 'uuid';
 import * as z from 'zod';
 import type { AgentMessage } from '../llm/types.ts';
+import {
+  type TodoSnapshot,
+  type TodoTask,
+  todoSnapshotSchema,
+} from '../todo/todo.ts';
 
 const SessionMetaSchema = z.object({
   type: z.literal('metadata'),
@@ -46,10 +51,18 @@ export interface SessionCompactionEntry extends BaseSessionEntry {
   firstRetainedEntryId: string;
 }
 
+// TODO 每次成功修改都追加完整快照；恢复时取最后一份有效快照。
+export interface SessionTodoEntry extends BaseSessionEntry {
+  type: 'todo';
+  todos: TodoTask[];
+  nextId: number;
+}
+
 export type SessionEntry =
   | SessionMeta
   | SessionMessageEntry
-  | SessionCompactionEntry;
+  | SessionCompactionEntry
+  | SessionTodoEntry;
 
 export interface SessionFileEntry {
   id: string;
@@ -269,6 +282,20 @@ export class SessionManager {
     return this._entries;
   }
 
+  latestTodoSnapshot(): TodoSnapshot | undefined {
+    for (let index = this._entries.length - 1; index >= 0; index--) {
+      const entry = this._entries[index];
+      if (entry?.type !== 'todo') {
+        continue;
+      }
+      const parsed = todoSnapshotSchema.safeParse(entry);
+      if (parsed.success) {
+        return { todos: parsed.data.todos, nextId: parsed.data.nextId };
+      }
+    }
+    return undefined;
+  }
+
   private _isMetadataEntry(entry: SessionEntry): entry is SessionMeta {
     return entry.type === 'metadata';
   }
@@ -278,6 +305,18 @@ export class SessionManager {
     const entry: SessionMessageEntry = {
       type: 'message',
       message: message,
+      id: uuidv7(),
+      timestamp: Date.now(),
+    };
+    this._enqueue(entry);
+    return entry.id;
+  }
+
+  appendTodo(snapshot: TodoSnapshot): string {
+    const entry: SessionTodoEntry = {
+      type: 'todo',
+      todos: structuredClone(snapshot.todos),
+      nextId: snapshot.nextId,
       id: uuidv7(),
       timestamp: Date.now(),
     };

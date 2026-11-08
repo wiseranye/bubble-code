@@ -4,6 +4,7 @@ import { editTool } from './edit.ts';
 import { findTool } from './find.ts';
 import { grepTool } from './grep.ts';
 import { readTool } from './read.ts';
+import { todoTool } from './todo.ts';
 import { ToolRegistry } from './types.ts';
 import { writeTool } from './write.ts';
 
@@ -16,6 +17,7 @@ export function newToolRegistry(): ToolRegistry {
   registry.register(findTool);
   registry.register(grepTool);
   registry.register(createAskUserTool());
+  registry.register(todoTool);
   return registry;
 }
 

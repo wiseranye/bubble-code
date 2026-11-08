@@ -1,6 +1,7 @@
 // 有状态门面
 
 import type { ModelApi, UserMessage } from '../llm/types.ts';
+import { TodoStore } from '../todo/todo.ts';
 import { ToolRegistry, type ToolSource } from '../tools/types.ts';
 import type { UiContext } from '../ui/ui-context.ts';
 import {
@@ -30,6 +31,7 @@ export const UNCONFIGURED_MODEL_MESSAGE =
 export class Agent {
   private readonly _state: AgentState;
   private readonly _tools: ToolSource;
+  private readonly _todoStore: TodoStore;
   private runTools: ToolRegistry | undefined;
   private readonly _hooks: AgentLoopHook[] = [];
   private readonly maxConcurrentToolCalls: number;
@@ -53,6 +55,7 @@ export class Agent {
     maxConcurrentToolCalls = 10,
   }: AgentOptions) {
     this._tools = tools;
+    this._todoStore = new TodoStore();
     this.cwd = cwd;
     this.maxConcurrentToolCalls = maxConcurrentToolCalls;
     this.uiContext = undefined;
@@ -113,6 +116,10 @@ export class Agent {
     return this.runTools ?? this._tools;
   }
 
+  get todoStore(): TodoStore {
+    return this._todoStore;
+  }
+
   async prompt(
     input: UserMessage,
     { signal }: { signal?: AbortSignal } = {},
@@ -127,6 +134,7 @@ export class Agent {
       cwd: this.cwd,
       ui: this.uiContext,
       messages: this._state.messages,
+      todoStore: this._todoStore,
     };
     try {
       const newMessages = await runAgentLoop(

@@ -182,9 +182,10 @@ export function createChatApp(
     // 全屏模式退出时不重画"文档"：转录区在非布局上下文里只剩 1 行，
     // 重画出来的是半截画面，直接切回普通屏更干净（pi 的做法）
     tui.stop({ preserveScreen: true });
-    void closeMcp()
-      .catch(() => {})
-      .then(() => process.exit(0));
+    // 等会话快照/消息与 MCP 都收尾；直接 exit 会丢掉队列尾部的写入。
+    void Promise.allSettled([session.dispose(), closeMcp()]).then(() =>
+      process.exit(0),
+    );
   };
 
   const handleKey = (data: string): TuiInputListenerResult => {

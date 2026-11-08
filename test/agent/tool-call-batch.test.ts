@@ -6,6 +6,7 @@ import {
 } from '../../src/agent/tool-call-batch.ts';
 import type { AgentContext, AgentEvent } from '../../src/agent/types.ts';
 import type { ToolCall } from '../../src/llm/types.ts';
+import { TodoStore } from '../../src/todo/todo.ts';
 import { defineTool } from '../../src/tools/schema.ts';
 import {
   type ToolContext,
@@ -69,13 +70,14 @@ function resultIds(events: readonly AgentEvent[]): string[] {
   );
 }
 
-test('passes call-specific id and session UI into each tool execution', async () => {
+test('passes call-specific id, session UI and todo store into each tool execution', async () => {
   const ui: UiContext = {
     custom: () => Promise.resolve(undefined),
     notify: () => undefined,
     setWidget: () => undefined,
   };
   const tools = new ToolRegistry();
+  const todoStore = new TodoStore();
   let seen: ToolContext | undefined;
   tools.register(
     defineTool({
@@ -91,12 +93,17 @@ test('passes call-specific id and session UI into each tool execution', async ()
   );
 
   await executeToolCallBatch([call('call-1')], {
-    context: { tools, cwd: '/tmp', messages: [], ui },
+    context: { tools, cwd: '/tmp', messages: [], ui, todoStore },
     maxConcurrentCalls: 1,
     emit: () => undefined,
   });
 
-  expect(seen).toMatchObject({ toolCallId: 'call-1', cwd: '/tmp', ui });
+  expect(seen).toMatchObject({
+    toolCallId: 'call-1',
+    cwd: '/tmp',
+    ui,
+    todoStore,
+  });
 });
 
 test('safe calls roll into freed slots and return results in declaration order', async () => {

@@ -1,3 +1,4 @@
+import type { TodoStore } from '../todo/todo.ts';
 import type { UiContext } from '../ui/ui-context.ts';
 
 // 工具上下文
@@ -6,6 +7,8 @@ export interface ToolContext {
   toolCallId?: string;
   signal?: AbortSignal;
   ui?: UiContext;
+  // 由 Agent 按会话注入；独立调用工具时可以不连接 TODO store
+  todoStore?: TodoStore;
 }
 
 // 工具渲染状态：queued/running/streaming 只有输入，done 才有结果

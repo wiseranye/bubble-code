@@ -6,6 +6,7 @@ import type {
   ToolCall,
   ToolResultMessage,
 } from '../llm/types.ts';
+import type { TodoStore } from '../todo/todo.ts';
 import type { ToolSource } from '../tools/types.ts';
 import type { UiContext } from '../ui/ui-context.ts';
 
@@ -52,6 +53,8 @@ export type AgentContext = {
   ui?: UiContext;
   // 会话中所有的消息
   messages: AgentMessage[];
+  // 每个 Agent 独立的 TODO 状态；直接构造测试上下文时可以为空
+  todoStore?: TodoStore;
 };
 
 export interface AgentState {

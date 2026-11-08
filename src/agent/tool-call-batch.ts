@@ -51,6 +51,7 @@ async function executeToolCall(
       toolCallId: call.id,
       signal,
       ui: context.ui,
+      todoStore: context.todoStore,
     });
     success = result.success;
     // error 和 output 分开保留；拼成模型可见文本的事在 llm 适配层做

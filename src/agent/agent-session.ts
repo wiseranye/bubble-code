@@ -6,6 +6,7 @@ import type {
   Usage,
   UserMessage,
 } from '../llm/types.ts';
+import { renderTodoLines } from '../ui/todo.ts';
 import type { UiContext } from '../ui/ui-context.ts';
 import { type Agent, UNCONFIGURED_MODEL_MESSAGE } from './agent.ts';
 import type { AgentLoopHookContext } from './agent-loop.ts';
@@ -98,6 +99,9 @@ export class AgentSession {
 
   private readonly agent: Agent;
   private readonly unsubscribeAgent: () => void;
+  private readonly unsubscribeTodos: () => void;
+  private uiContext: UiContext | undefined;
+  private readonly hiddenCompletedTodoIds: Set<number>;
 
   private readonly sessionManager: SessionManager;
 
@@ -144,6 +148,18 @@ export class AgentSession {
       prepareTurn: context => this.compactBeforeRequest(context),
     });
     this.sessionManager = new SessionManager(agent.cwd, sessionFile);
+    this.uiContext = undefined;
+    this.hiddenCompletedTodoIds = new Set();
+    if (sessionFile !== undefined) {
+      agent.todoStore.hydrate(
+        this.sessionManager.latestTodoSnapshot() ?? { todos: [], nextId: 1 },
+      );
+    }
+    // 成功修改先入会话写队列，再重画面板；hydrate 不触发这个监听器。
+    this.unsubscribeTodos = agent.todoStore.subscribe(snapshot => {
+      this.sessionManager.appendTodo(snapshot);
+      this.refreshTodoWidget();
+    });
     if (sessionFile === undefined) {
       // 欢迎语在 UI 订阅之前就存在，启动时直接补建视图
       this.store.push({
@@ -306,7 +322,37 @@ export class AgentSession {
   }
 
   setUiContext(uiContext: UiContext | undefined): void {
+    if (this.uiContext !== undefined && this.uiContext !== uiContext) {
+      this.uiContext.setWidget('todo', undefined);
+    }
+    this.uiContext = uiContext;
     this.agent.setUiContext(uiContext);
+    this.refreshTodoWidget();
+  }
+
+  private hideCompletedTodos(): void {
+    for (const task of this.agent.todoStore.snapshot().todos) {
+      if (task.status === 'completed') {
+        this.hiddenCompletedTodoIds.add(task.id);
+      }
+    }
+    this.refreshTodoWidget();
+  }
+
+  private refreshTodoWidget(): void {
+    const todos = this.agent.todoStore.snapshot().todos;
+    const completedIds = new Set(
+      todos.filter(task => task.status === 'completed').map(task => task.id),
+    );
+    // 重新打开后会再次出现在面板；之后重新完成时也保持可见。
+    for (const id of this.hiddenCompletedTodoIds) {
+      if (!completedIds.has(id)) {
+        this.hiddenCompletedTodoIds.delete(id);
+      }
+    }
+
+    const lines = renderTodoLines(todos, this.hiddenCompletedTodoIds);
+    this.uiContext?.setWidget('todo', lines.length === 0 ? undefined : lines);
   }
 
   get skills(): readonly Skill[] {
@@ -380,6 +426,8 @@ export class AgentSession {
       return;
     }
 
+    // 只隐藏上一轮已经完成的任务；本轮新完成的任务仍可见。
+    this.hideCompletedTodos();
     const userMessage: TextChatMessage = {
       id: this.idCounter++,
       role: 'user',
@@ -439,6 +487,7 @@ export class AgentSession {
   // 返回写入落盘的 Promise：/resume 重读同一个会话文件前必须 await
   dispose(): Promise<void> {
     this.unsubscribeAgent();
+    this.unsubscribeTodos();
     return this.sessionManager.close();
   }
 
