@@ -126,6 +126,8 @@ test('reports MCP status counts and notifies state changes', async () => {
   });
   const starting = manager.start(process.cwd(), () => {}, onStatusChange);
   expect(onStatusChange).toHaveBeenCalledTimes(1);
+  // load() 在微任务里调用 loader，先等 resolver 完成注册再解除阻塞。
+  await Promise.resolve();
   resolveLoading?.(loaded());
   await starting;
   expect(manager.statusFor(process.cwd())).toEqual({

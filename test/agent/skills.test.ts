@@ -437,7 +437,7 @@ test('agent factory scans once per new or resumed session and never during promp
   expect(scans).toBe(1);
   expect(initialAgent.systemPrompt.build().content).toContain('before');
   await initial.dispose();
-  const [entry] = loadSessionFileEntries(process.cwd());
+  const [entry] = loadSessionFileEntries(join(root, 'cwd'));
   if (entry === undefined) {
     throw new TypeError('expected the initial session file');
   }

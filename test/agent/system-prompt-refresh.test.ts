@@ -710,12 +710,12 @@ test('mid-run compaction prunes the status bar run order and keeps only the late
   session.prompt('U'.repeat(4000));
   await until(() => !session.isStreaming);
 
-  // 投影：4000 字符的用户消息被摘要，保留当前 Run 的系统提示词与保留区间
+  // 投影：4000 字符的用户消息被摘要；最新系统提示词在开头，随后是摘要与保留区间
   expect(agent.state.messages.map(message => message.role)).toEqual([
+    'system',
     'user',
     'assistant',
     'tool_result',
-    'system',
     'assistant',
   ]);
   expect(systemMessages(agent.state.messages)).toHaveLength(1);
